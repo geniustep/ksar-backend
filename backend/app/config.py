@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     # App
     APP_NAME: str = "KSAR"
     DEBUG: bool = False
-    ALLOWED_ORIGINS: str = "http://localhost:3000"
+    ALLOWED_ORIGINS: str = "https://ksar.geniura.com,http://localhost:3001"
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://igatha:igatha_pass@db:5432/igatha"
