@@ -5,6 +5,7 @@ class UserRole(str, enum.Enum):
     """أدوار المستخدمين"""
     ADMIN = "admin"           # الإدارة
     ORGANIZATION = "organization"  # المؤسسات
+    CITIZEN = "citizen"       # المواطنون (مقدمو الطلبات)
 
 
 class UserStatus(str, enum.Enum):

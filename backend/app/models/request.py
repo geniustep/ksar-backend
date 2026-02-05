@@ -9,12 +9,15 @@ from app.core.constants import RequestCategory, RequestStatus
 
 
 class Request(Base):
-    """نموذج طلب المساعدة - مبسط"""
+    """نموذج طلب المساعدة"""
     __tablename__ = "requests"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     
-    # بيانات صاحب الطلب (بدون تسجيل)
+    # ربط بالمستخدم المسجل
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    
+    # بيانات صاحب الطلب (تُملأ من المستخدم أو يُدخلها)
     requester_name = Column(String(100), nullable=False)      # اسم صاحب الطلب
     requester_phone = Column(String(20), nullable=False, index=True)  # رقم الهاتف
     
@@ -45,4 +48,5 @@ class Request(Base):
     completed_at = Column(DateTime(timezone=True), nullable=True)
     
     # Relationships
+    user = relationship("User", back_populates="requests", foreign_keys=[user_id])
     assignments = relationship("Assignment", back_populates="request")

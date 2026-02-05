@@ -10,7 +10,7 @@ from app.core.constants import UserRole, UserStatus
 
 
 class User(Base):
-    """نموذج المستخدم - للإدارة والمؤسسات فقط"""
+    """نموذج المستخدم - للإدارة والمؤسسات والمواطنين"""
     __tablename__ = "users"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -21,7 +21,12 @@ class User(Base):
     
     # البيانات الأساسية
     full_name = Column(String(100), nullable=False)
-    phone = Column(String(20), nullable=True)
+    phone = Column(String(20), nullable=True, index=True)
+    
+    # العنوان (للمواطنين)
+    address = Column(String(500), nullable=True)
+    city = Column(String(100), nullable=True)
+    region = Column(String(100), nullable=True)
     
     # الدور والحالة
     role = Column(Enum(UserRole), nullable=False)
@@ -34,3 +39,4 @@ class User(Base):
     
     # Relationships
     organization = relationship("Organization", back_populates="user", uselist=False)
+    requests = relationship("Request", back_populates="user", foreign_keys="Request.user_id")

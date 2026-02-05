@@ -100,6 +100,33 @@ async def create_sample_organization():
         print("   🔑 كلمة المرور: org123")
 
 
+async def create_sample_citizen():
+    """إنشاء مواطن نموذجي"""
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.orm import sessionmaker
+    
+    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    
+    async with async_session() as session:
+        citizen = User(
+            email="citizen@example.ma",
+            password_hash=hash_password("citizen123"),
+            full_name="أحمد محمد",
+            phone="0622222222",
+            address="حي السلام، زقاق رقم 5",
+            city="الدار البيضاء",
+            region="حي السلام",
+            role=UserRole.CITIZEN,
+            status=UserStatus.ACTIVE,
+        )
+        session.add(citizen)
+        await session.commit()
+        
+        print("✅ تم إنشاء مواطن نموذجي:")
+        print("   📧 البريد: citizen@example.ma")
+        print("   🔑 كلمة المرور: citizen123")
+
+
 async def main():
     print("=" * 50)
     print("   🏥 KSAR - إعداد قاعدة البيانات")
@@ -108,6 +135,7 @@ async def main():
     await init_database()
     await create_admin_user()
     await create_sample_organization()
+    await create_sample_citizen()
     
     print("=" * 50)
     print("   ✅ تم الإعداد بنجاح!")

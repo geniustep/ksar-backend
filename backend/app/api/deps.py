@@ -76,3 +76,15 @@ async def get_current_organization(
             detail="هذه العملية متاحة للمؤسسات فقط",
         )
     return current_user
+
+
+async def get_current_citizen(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """التحقق من صلاحيات المواطن"""
+    if current_user.role != UserRole.CITIZEN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="هذه العملية متاحة للمواطنين فقط",
+        )
+    return current_user
