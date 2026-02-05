@@ -4,7 +4,7 @@ from typing import List
 
 class Settings(BaseSettings):
     # App
-    APP_NAME: str = "Igatha"
+    APP_NAME: str = "KSAR"
     DEBUG: bool = False
     ALLOWED_ORIGINS: str = "http://localhost:3000"
 
@@ -17,19 +17,7 @@ class Settings(BaseSettings):
     # JWT
     JWT_SECRET_KEY: str = "change-this-to-a-secure-random-string"
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
-
-    # OTP
-    OTP_LENGTH: int = 6
-    OTP_EXPIRE_MINUTES: int = 5
-    OTP_MAX_ATTEMPTS: int = 3
-
-    # SMS Provider
-    SMS_PROVIDER: str = "console"  # console, twilio
-    TWILIO_ACCOUNT_SID: str = ""
-    TWILIO_AUTH_TOKEN: str = ""
-    TWILIO_PHONE_NUMBER: str = ""
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # يوم واحد
 
     @property
     def allowed_origins_list(self) -> List[str]:

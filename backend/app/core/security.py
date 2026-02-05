@@ -1,69 +1,56 @@
-import hashlib
-import random
-import string
-import re
+"""
+وحدة الأمان - تشفير كلمات المرور وإدارة التوكنات
+"""
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Dict, Any
 
-from jose import JWTError, jwt
+from jose import jwt, JWTError
 from passlib.context import CryptContext
 
 from app.config import settings
 
+# إعداد تشفير كلمات المرور
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+def hash_password(password: str) -> str:
+    """تشفير كلمة المرور"""
+    return pwd_context.hash(password)
+
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """التحقق من كلمة المرور"""
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
+    """إنشاء رمز الوصول JWT"""
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (
-        expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    
+    if expires_delta:
+        expire = datetime.now(timezone.utc) + expires_delta
+    else:
+        expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    
+    to_encode.update({"exp": expire})
+    
+    encoded_jwt = jwt.encode(
+        to_encode, 
+        settings.JWT_SECRET_KEY, 
+        algorithm=settings.JWT_ALGORITHM
     )
-    to_encode.update({"exp": expire, "type": "access"})
-    return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    
+    return encoded_jwt
 
 
-def create_refresh_token(data: dict) -> str:
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-    to_encode.update({"exp": expire, "type": "refresh"})
-    return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
-
-
-def decode_token(token: str) -> Optional[dict]:
+def decode_token(token: str) -> Optional[Dict[str, Any]]:
+    """فك تشفير التوكن"""
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(
+            token, 
+            settings.JWT_SECRET_KEY, 
+            algorithms=[settings.JWT_ALGORITHM]
+        )
         return payload
     except JWTError:
         return None
-
-
-def generate_otp(length: int = None) -> str:
-    length = length or settings.OTP_LENGTH
-    return "".join(random.choices(string.digits, k=length))
-
-
-def hash_otp(otp: str) -> str:
-    return pwd_context.hash(otp)
-
-
-def verify_otp(plain_otp: str, hashed_otp: str) -> bool:
-    return pwd_context.verify(plain_otp, hashed_otp)
-
-
-def normalize_arabic(text: str) -> str:
-    """Remove Arabic diacritics and normalize text for comparison."""
-    # Remove tashkeel (diacritics)
-    text = re.sub(r"[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06DC\u06DF-\u06E4\u06E7\u06E8\u06EA-\u06ED]", "", text)
-    # Normalize alef variants
-    text = re.sub(r"[إأآا]", "ا", text)
-    # Normalize taa marbuta
-    text = text.replace("ة", "ه")
-    # Remove extra whitespace
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
-
-
-def generate_duplicate_hash(phone: str, category: str, location_text: str) -> str:
-    normalized_location = normalize_arabic(location_text)[:50]
-    data = f"{phone}:{category}:{normalized_location}"
-    return hashlib.sha256(data.encode()).hexdigest()

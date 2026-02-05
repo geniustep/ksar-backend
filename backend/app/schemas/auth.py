@@ -1,38 +1,44 @@
-from pydantic import BaseModel, Field
-import re
+from typing import Optional
+from pydantic import BaseModel, Field, EmailStr
+
+from app.core.constants import UserRole
 
 
-class PhoneNumber(BaseModel):
-    phone: str = Field(..., min_length=10, max_length=20, examples=["+212612345678"])
-
-    @classmethod
-    def validate_phone(cls, v: str) -> str:
-        pattern = r"^\+?[1-9]\d{8,14}$"
-        if not re.match(pattern, v):
-            raise ValueError("رقم الهاتف غير صالح")
-        return v
+class LoginRequest(BaseModel):
+    """طلب تسجيل الدخول"""
+    email: EmailStr
+    password: str = Field(..., min_length=6)
 
 
-class OTPStartRequest(PhoneNumber):
-    pass
-
-
-class OTPStartResponse(BaseModel):
-    message: str = "تم إرسال رمز التحقق"
-    expires_in: int = 300
-
-
-class OTPVerifyRequest(PhoneNumber):
-    otp: str = Field(..., min_length=4, max_length=8)
-
-
-class OTPVerifyResponse(BaseModel):
+class LoginResponse(BaseModel):
+    """استجابة تسجيل الدخول"""
     access_token: str
-    refresh_token: str
     token_type: str = "bearer"
-    is_new_user: bool
+    user: "UserResponse"
 
 
 class TokenRefreshResponse(BaseModel):
+    """استجابة تحديث التوكن"""
     access_token: str
     token_type: str = "bearer"
+
+
+class UserResponse(BaseModel):
+    """بيانات المستخدم"""
+    id: str
+    email: str
+    full_name: str
+    role: UserRole
+    organization_id: Optional[str] = None
+    organization_name: Optional[str] = None
+    
+    model_config = {"from_attributes": True}
+
+
+class ChangePasswordRequest(BaseModel):
+    """تغيير كلمة المرور"""
+    current_password: str
+    new_password: str = Field(..., min_length=6)
+
+
+LoginResponse.model_rebuild()
