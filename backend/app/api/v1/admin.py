@@ -21,6 +21,7 @@ from app.schemas.request import (
     RequestAdminUpdate,
     PaginatedRequests,
 )
+from app.schemas.assignment import AssignmentBriefResponse
 from app.core.constants import RequestStatus, RequestCategory, AssignmentStatus
 
 router = APIRouter(prefix="/admin", tags=["الإدارة - Admin"])
@@ -98,14 +99,14 @@ async def get_request_detail(
         select(Assignment).where(Assignment.request_id == request_id)
     )
     assignments = assignments_result.scalars().all()
-    
-    response = RequestDetailResponse.model_validate(request)
-    response.assignments = [
-        {"id": a.id, "org_id": a.org_id, "status": a.status, "created_at": a.created_at}
-        for a in assignments
-    ]
-    
-    return response
+
+    # بناء الاستجابة يدوياً لتجنب تعبئة assignments من علاقة الـ ORM (تسبب خطأ تحقق)
+    base = RequestResponse.model_validate(request)
+    return RequestDetailResponse(
+        **base.model_dump(),
+        admin_notes=request.admin_notes,
+        assignments=[AssignmentBriefResponse.model_validate(a) for a in assignments],
+    )
 
 
 @router.patch("/requests/{request_id}")
