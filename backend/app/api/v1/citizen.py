@@ -50,6 +50,17 @@ def calculate_priority(category: RequestCategory, family_members: int, is_urgent
     return min(score, 100)
 
 
+def parse_images(images_json: Optional[str]) -> Optional[list[str]]:
+    """تحويل الصور من JSON إلى قائمة"""
+    import json
+    if not images_json:
+        return None
+    try:
+        return json.loads(images_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
 def get_status_arabic(status: RequestStatus) -> str:
     """ترجمة الحالة للعربية"""
     translations = {
@@ -70,7 +81,7 @@ import re
 class CitizenRequestCreate(BaseModel):
     """إنشاء طلب من مواطن مسجل"""
     category: RequestCategory = Field(..., description="تصنيف الطلب")
-    description: str = Field(..., min_length=10, max_length=2000, description="وصف الاحتياج")
+    description: Optional[str] = Field(default=None, max_length=2000, description="وصف الاحتياج (اختياري)")
     quantity: int = Field(default=1, ge=1, le=100, description="الكمية المطلوبة")
     family_members: int = Field(default=1, ge=1, le=50, description="عدد أفراد الأسرة")
     
@@ -81,17 +92,23 @@ class CitizenRequestCreate(BaseModel):
     latitude: Optional[float] = Field(default=None, ge=-90, le=90, description="خط العرض")
     longitude: Optional[float] = Field(default=None, ge=-180, le=180, description="خط الطول")
     
+    # المرفقات (اختياري)
+    audio_url: Optional[str] = Field(default=None, max_length=500, description="رابط الملف الصوتي")
+    images: Optional[list[str]] = Field(default=None, max_length=5, description="روابط الصور (حد أقصى 5)")
+    
     is_urgent: bool = Field(default=False, description="هل الطلب مستعجل؟")
 
 
 class CitizenRequestUpdate(BaseModel):
     """تحديث طلب (قبل التكفل فقط)"""
-    description: Optional[str] = Field(default=None, min_length=10, max_length=2000)
+    description: Optional[str] = Field(default=None, max_length=2000)
     quantity: Optional[int] = Field(default=None, ge=1, le=100)
     family_members: Optional[int] = Field(default=None, ge=1, le=50)
     address: Optional[str] = Field(default=None, max_length=500)
     city: Optional[str] = Field(default=None, max_length=100)
     region: Optional[str] = Field(default=None, max_length=100)
+    audio_url: Optional[str] = Field(default=None, max_length=500)
+    images: Optional[list[str]] = Field(default=None, max_length=5)
     is_urgent: Optional[bool] = None
 
 
@@ -100,12 +117,16 @@ class CitizenRequestResponse(BaseModel):
     id: UUID
     tracking_code: str
     category: RequestCategory
-    description: str
+    description: Optional[str]
     quantity: int
     family_members: int
-    address: str
+    address: Optional[str]
     city: Optional[str]
     region: Optional[str]
+    latitude: Optional[float]
+    longitude: Optional[float]
+    audio_url: Optional[str]
+    images: Optional[list[str]]
     status: RequestStatus
     status_ar: str
     is_urgent: bool
@@ -144,19 +165,18 @@ async def create_request(
     - يتطلب تسجيل الدخول كمواطن
     - يستخدم بيانات المستخدم تلقائياً
     """
-    # استخدام عنوان المستخدم إذا لم يُحدد
-    address = body.address or current_user.address
-    if not address:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="يرجى تحديد العنوان أو تحديث ملفك الشخصي بالعنوان",
-        )
+    import json
     
+    # استخدام عنوان المستخدم إذا لم يُحدد (العنوان اختياري الآن)
+    address = body.address or current_user.address
     city = body.city or current_user.city
     region = body.region or current_user.region
     
     # حساب الأولوية
     priority = calculate_priority(body.category, body.family_members, body.is_urgent)
+    
+    # تحويل قائمة الصور إلى JSON string للتخزين
+    images_json = json.dumps(body.images) if body.images else None
     
     # إنشاء الطلب
     request = Request(
@@ -164,14 +184,16 @@ async def create_request(
         requester_name=current_user.full_name,
         requester_phone=current_user.phone,
         category=body.category,
-        description=body.description,
+        description=body.description or "",
         quantity=body.quantity,
         family_members=body.family_members,
-        address=address,
+        address=address or "",
         city=city,
         region=region,
         latitude=body.latitude,
         longitude=body.longitude,
+        audio_url=body.audio_url,
+        images=images_json,
         priority_score=priority,
         is_urgent=1 if body.is_urgent else 0,
         status=RequestStatus.NEW,
@@ -239,6 +261,10 @@ async def get_my_requests(
             address=req.address,
             city=req.city,
             region=req.region,
+            latitude=req.latitude,
+            longitude=req.longitude,
+            audio_url=req.audio_url,
+            images=parse_images(req.images),
             status=req.status,
             status_ar=get_status_arabic(req.status),
             is_urgent=bool(req.is_urgent),
@@ -301,6 +327,10 @@ async def get_request_detail(
         address=request.address,
         city=request.city,
         region=request.region,
+        latitude=request.latitude,
+        longitude=request.longitude,
+        audio_url=request.audio_url,
+        images=parse_images(request.images),
         status=request.status,
         status_ar=get_status_arabic(request.status),
         is_urgent=bool(request.is_urgent),
@@ -354,6 +384,11 @@ async def update_request(
         request.city = body.city
     if body.region is not None:
         request.region = body.region
+    if body.audio_url is not None:
+        request.audio_url = body.audio_url
+    if body.images is not None:
+        import json
+        request.images = json.dumps(body.images)
     if body.is_urgent is not None:
         request.is_urgent = 1 if body.is_urgent else 0
         # إعادة حساب الأولوية
@@ -376,6 +411,10 @@ async def update_request(
         address=request.address,
         city=request.city,
         region=request.region,
+        latitude=request.latitude,
+        longitude=request.longitude,
+        audio_url=request.audio_url,
+        images=parse_images(request.images),
         status=request.status,
         status_ar=get_status_arabic(request.status),
         is_urgent=bool(request.is_urgent),

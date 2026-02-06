@@ -21,6 +21,8 @@ from app.schemas.auth import (
     UserProfileResponse,
     UpdateProfileRequest,
     ChangePasswordRequest,
+    PhoneRegisterRequest,
+    PhoneRegisterResponse,
 )
 from app.core.security import (
     verify_password,
@@ -168,6 +170,83 @@ async def login(
             organization_id=org_id,
             organization_name=org_name,
         ),
+    )
+
+
+@router.post("/phone-register", response_model=PhoneRegisterResponse, status_code=201)
+async def phone_register(
+    body: PhoneRegisterRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    تسجيل مواطن برقم الهاتف فقط (مؤقت - بدون OTP)
+    
+    - إذا كان رقم الهاتف موجوداً، يتم تسجيل الدخول مباشرة
+    - إذا كان جديداً، يتم إنشاء حساب جديد
+    """
+    import secrets
+    
+    # تنظيف رقم الهاتف
+    phone = body.phone.replace(' ', '').replace('-', '')
+    
+    # البحث عن مستخدم بنفس رقم الهاتف
+    result = await db.execute(
+        select(User).where(User.phone == phone)
+    )
+    user = result.scalar_one_or_none()
+    
+    is_new = False
+    
+    if user:
+        # المستخدم موجود - تسجيل دخول مباشر
+        if user.status.value != "active":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="الحساب معطل",
+            )
+        # تحديث وقت آخر دخول
+        user.last_login = datetime.now(timezone.utc)
+        await db.commit()
+    else:
+        # إنشاء مستخدم جديد
+        is_new = True
+        # إنشاء بريد إلكتروني وهمي فريد (مؤقت)
+        random_suffix = secrets.token_hex(4)
+        temp_email = f"phone_{phone}_{random_suffix}@temp.ksar.local"
+        
+        user = User(
+            email=temp_email,
+            password_hash=hash_password(secrets.token_urlsafe(32)),  # كلمة مرور عشوائية
+            full_name=body.full_name or f"مواطن {phone[-4:]}",
+            phone=phone,
+            role=UserRole.CITIZEN,
+            status=UserStatus.ACTIVE,
+        )
+        
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+    
+    # إنشاء التوكن
+    access_token = create_access_token(
+        data={
+            "sub": str(user.id),
+            "role": user.role.value,
+            "org_id": None,
+        }
+    )
+    
+    return PhoneRegisterResponse(
+        message="تم التسجيل بنجاح" if is_new else "تم تسجيل الدخول بنجاح",
+        user=UserResponse(
+            id=str(user.id),
+            email=user.email,
+            full_name=user.full_name,
+            phone=user.phone,
+            role=user.role,
+        ),
+        access_token=access_token,
+        is_new_user=is_new,
     )
 
 

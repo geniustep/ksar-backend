@@ -23,16 +23,20 @@ class Request(Base):
     
     # تفاصيل الطلب
     category = Column(Enum(RequestCategory), nullable=False)
-    description = Column(Text, nullable=False)                # وصف الطلب/الاحتياج
+    description = Column(Text, nullable=True)                 # وصف الطلب/الاحتياج (اختياري)
     quantity = Column(Integer, default=1)                     # الكمية المطلوبة
     family_members = Column(Integer, default=1)               # عدد أفراد الأسرة
     
     # الموقع
-    address = Column(String(500), nullable=False)             # العنوان التفصيلي
+    address = Column(String(500), nullable=True)              # العنوان التفصيلي (اختياري)
     city = Column(String(100), nullable=True)                 # المدينة
     region = Column(String(100), nullable=True, index=True)   # المنطقة/الحي
     latitude = Column(Float, nullable=True)                   # خط العرض
     longitude = Column(Float, nullable=True)                  # خط الطول
+    
+    # المرفقات - الصوت والصور
+    audio_url = Column(String(500), nullable=True)            # رابط الملف الصوتي (تخزين خارجي)
+    images = Column(Text, nullable=True)                      # روابط الصور (JSON array كنص)
     
     # الحالة والأولوية
     status = Column(Enum(RequestStatus), default=RequestStatus.NEW)

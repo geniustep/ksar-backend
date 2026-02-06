@@ -105,5 +105,29 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=6)
 
 
+class PhoneRegisterRequest(BaseModel):
+    """طلب تسجيل مواطن برقم الهاتف فقط (مؤقت - بدون OTP)"""
+    phone: str = Field(..., min_length=10, max_length=20, description="رقم الهاتف")
+    full_name: Optional[str] = Field(default=None, min_length=2, max_length=100, description="الاسم (اختياري)")
+    
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        phone = re.sub(r'[\s\-]', '', v)
+        if not re.match(r'^(\+?[0-9]{10,15})$', phone):
+            raise ValueError('رقم الهاتف غير صالح')
+        return phone
+
+
+class PhoneRegisterResponse(BaseModel):
+    """استجابة التسجيل برقم الهاتف"""
+    message: str = "تم التسجيل بنجاح"
+    user: "UserResponse"
+    access_token: str
+    token_type: str = "bearer"
+    is_new_user: bool = True
+
+
 LoginResponse.model_rebuild()
 RegisterResponse.model_rebuild()
+PhoneRegisterResponse.model_rebuild()
