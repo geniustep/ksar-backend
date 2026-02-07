@@ -416,6 +416,7 @@ async def create_organization(
     user = User(
         email=email,
         password_hash=hash_password(access_code),
+        access_code=access_code,
         full_name=body.name,
         phone=phone,
         city=body.city,
@@ -487,6 +488,7 @@ async def regenerate_organization_code(
     # توليد كود جديد
     access_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
     user.password_hash = hash_password(access_code)
+    user.access_code = access_code
     
     await db.commit()
     
