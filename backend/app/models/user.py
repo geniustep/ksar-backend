@@ -40,3 +40,4 @@ class User(Base):
     # Relationships
     organization = relationship("Organization", back_populates="user", uselist=False)
     requests = relationship("Request", back_populates="user", foreign_keys="Request.user_id")
+    inspected_requests = relationship("Request", back_populates="inspector", foreign_keys="Request.inspector_id")

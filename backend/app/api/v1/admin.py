@@ -22,7 +22,14 @@ from app.schemas.request import (
     PaginatedRequests,
 )
 from app.schemas.assignment import AssignmentBriefResponse
-from app.core.constants import RequestStatus, RequestCategory, AssignmentStatus
+from app.core.constants import RequestStatus, RequestCategory, AssignmentStatus, UserRole, UserStatus
+from app.core.security import hash_password
+from app.schemas.inspector import (
+    InspectorCreateRequest,
+    InspectorResponse,
+    InspectorCreatedResponse,
+    InspectorListResponse,
+)
 
 router = APIRouter(prefix="/admin", tags=["الإدارة - Admin"])
 
@@ -375,3 +382,175 @@ async def update_organization_status(
     await db.commit()
     
     return {"message": "تم تحديث حالة المؤسسة"}
+
+
+# === إدارة المراقبين ===
+
+@router.post("/inspectors", response_model=InspectorCreatedResponse, status_code=201)
+async def create_inspector(
+    body: InspectorCreateRequest,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """إنشاء حساب مراقب جديد"""
+    import secrets
+    
+    # تنظيف رقم الهاتف
+    phone = body.phone.replace(' ', '').replace('-', '')
+    
+    # التحقق من عدم وجود الهاتف مسبقاً
+    phone_result = await db.execute(
+        select(User).where(User.phone == phone)
+    )
+    if phone_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=400,
+            detail="رقم الهاتف مستخدم بالفعل",
+        )
+    
+    # توليد كود دخول من 6 أرقام
+    access_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+    
+    # إنشاء بريد إلكتروني وهمي فريد
+    random_suffix = secrets.token_hex(4)
+    temp_email = f"inspector_{phone}_{random_suffix}@inspector.ksar.local"
+    
+    # إنشاء المستخدم
+    user = User(
+        email=temp_email,
+        password_hash=hash_password(access_code),
+        full_name=body.full_name,
+        phone=phone,
+        role=UserRole.INSPECTOR,
+        status=UserStatus.ACTIVE,
+    )
+    
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    
+    return InspectorCreatedResponse(
+        message="تم إنشاء حساب المراقب بنجاح",
+        inspector=InspectorResponse(
+            id=str(user.id),
+            full_name=user.full_name,
+            phone=user.phone,
+            status=user.status.value,
+            created_at=user.created_at,
+            last_login=user.last_login,
+        ),
+        access_code=access_code,
+    )
+
+
+@router.get("/inspectors", response_model=InspectorListResponse)
+async def get_inspectors(
+    status: Optional[str] = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """قائمة المراقبين"""
+    query = select(User).where(User.role == UserRole.INSPECTOR)
+    
+    if status:
+        query = query.where(User.status == UserStatus(status))
+    
+    count_query = select(func.count()).select_from(query.subquery())
+    total = (await db.execute(count_query)).scalar()
+    
+    query = query.order_by(User.created_at.desc())
+    query = query.offset((page - 1) * limit).limit(limit)
+    
+    result = await db.execute(query)
+    inspectors = result.scalars().all()
+    
+    return InspectorListResponse(
+        items=[
+            InspectorResponse(
+                id=str(u.id),
+                full_name=u.full_name,
+                phone=u.phone,
+                status=u.status.value,
+                created_at=u.created_at,
+                last_login=u.last_login,
+            )
+            for u in inspectors
+        ],
+        total=total,
+        page=page,
+        limit=limit,
+    )
+
+
+@router.patch("/inspectors/{inspector_id}/status")
+async def update_inspector_status(
+    inspector_id: UUID,
+    status: str,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """تعطيل/تفعيل مراقب"""
+    result = await db.execute(
+        select(User).where(User.id == inspector_id, User.role == UserRole.INSPECTOR)
+    )
+    inspector = result.scalar_one_or_none()
+    
+    if not inspector:
+        raise HTTPException(status_code=404, detail="المراقب غير موجود")
+    
+    inspector.status = UserStatus(status)
+    await db.commit()
+    
+    return {"message": "تم تحديث حالة المراقب"}
+
+
+@router.post("/inspectors/{inspector_id}/regenerate-code")
+async def regenerate_inspector_code(
+    inspector_id: UUID,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """إعادة توليد كود دخول المراقب"""
+    import secrets
+    
+    result = await db.execute(
+        select(User).where(User.id == inspector_id, User.role == UserRole.INSPECTOR)
+    )
+    inspector = result.scalar_one_or_none()
+    
+    if not inspector:
+        raise HTTPException(status_code=404, detail="المراقب غير موجود")
+    
+    # توليد كود جديد
+    access_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+    inspector.password_hash = hash_password(access_code)
+    
+    await db.commit()
+    
+    return {
+        "message": "تم إعادة توليد كود الدخول",
+        "access_code": access_code,
+    }
+
+
+@router.delete("/inspectors/{inspector_id}")
+async def delete_inspector(
+    inspector_id: UUID,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """حذف مراقب"""
+    result = await db.execute(
+        select(User).where(User.id == inspector_id, User.role == UserRole.INSPECTOR)
+    )
+    inspector = result.scalar_one_or_none()
+    
+    if not inspector:
+        raise HTTPException(status_code=404, detail="المراقب غير موجود")
+    
+    await db.delete(inspector)
+    await db.commit()
+    
+    return {"message": "تم حذف المراقب"}

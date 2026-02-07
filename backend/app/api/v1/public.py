@@ -27,11 +27,13 @@ def generate_tracking_code(request_id: UUID) -> str:
 def get_status_arabic(status: RequestStatus) -> str:
     """ترجمة الحالة للعربية"""
     translations = {
+        RequestStatus.PENDING: "معلق - في انتظار المراجعة",
         RequestStatus.NEW: "جديد - في انتظار التكفل",
         RequestStatus.ASSIGNED: "متكفل به",
         RequestStatus.IN_PROGRESS: "قيد التنفيذ",
         RequestStatus.COMPLETED: "مكتمل",
         RequestStatus.CANCELLED: "ملغي",
+        RequestStatus.REJECTED: "مرفوض",
     }
     return translations.get(status, str(status.value))
 

@@ -88,3 +88,15 @@ async def get_current_citizen(
             detail="هذه العملية متاحة للمواطنين فقط",
         )
     return current_user
+
+
+async def get_current_inspector(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """التحقق من صلاحيات المراقب"""
+    if current_user.role != UserRole.INSPECTOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="هذه العملية متاحة للمراقبين فقط",
+        )
+    return current_user

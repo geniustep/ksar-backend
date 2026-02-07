@@ -23,7 +23,9 @@ from app.schemas.auth import (
     ChangePasswordRequest,
     PhoneRegisterRequest,
     PhoneRegisterResponse,
+    InspectorLoginResponse,
 )
+from app.schemas.inspector import InspectorLoginRequest
 from app.core.security import (
     verify_password,
     hash_password,
@@ -405,6 +407,62 @@ async def update_profile(
         role=user.role,
         organization_id=org_id,
         organization_name=org_name,
+    )
+
+
+@router.post("/inspector-login", response_model=InspectorLoginResponse)
+async def inspector_login(
+    body: InspectorLoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    تسجيل دخول المراقب برقم الهاتف والكود
+    
+    - الكود يُقدم من الأدمين عند إنشاء حساب المراقب
+    """
+    # تنظيف رقم الهاتف
+    phone = body.phone.replace(' ', '').replace('-', '')
+    
+    # البحث عن المراقب بالهاتف
+    result = await db.execute(
+        select(User).where(User.phone == phone, User.role == UserRole.INSPECTOR)
+    )
+    user = result.scalar_one_or_none()
+    
+    if not user or not verify_password(body.code, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="رقم الهاتف أو كود الدخول غير صحيح",
+        )
+    
+    if user.status.value != "active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="الحساب معطل",
+        )
+    
+    # تحديث وقت آخر دخول
+    user.last_login = datetime.now(timezone.utc)
+    await db.commit()
+    
+    # إنشاء التوكن
+    access_token = create_access_token(
+        data={
+            "sub": str(user.id),
+            "role": user.role.value,
+            "org_id": None,
+        }
+    )
+    
+    return InspectorLoginResponse(
+        access_token=access_token,
+        user=UserResponse(
+            id=str(user.id),
+            email=user.email,
+            full_name=user.full_name,
+            phone=user.phone,
+            role=user.role,
+        ),
     )
 
 

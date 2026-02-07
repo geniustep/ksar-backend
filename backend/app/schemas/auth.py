@@ -128,6 +128,14 @@ class PhoneRegisterResponse(BaseModel):
     is_new_user: bool = True
 
 
+class InspectorLoginResponse(BaseModel):
+    """استجابة تسجيل دخول المراقب"""
+    access_token: str
+    token_type: str = "bearer"
+    user: "UserResponse"
+
+
 LoginResponse.model_rebuild()
 RegisterResponse.model_rebuild()
 PhoneRegisterResponse.model_rebuild()
+InspectorLoginResponse.model_rebuild()

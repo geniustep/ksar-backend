@@ -38,8 +38,12 @@ class Request(Base):
     audio_url = Column(String(500), nullable=True)            # رابط الملف الصوتي (تخزين خارجي)
     images = Column(Text, nullable=True)                      # روابط الصور (JSON array كنص)
     
+    # المراقب المسؤول
+    inspector_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True, index=True)
+    inspector_notes = Column(Text, nullable=True)             # ملاحظات المراقب
+    
     # الحالة والأولوية
-    status = Column(Enum(RequestStatus), default=RequestStatus.NEW)
+    status = Column(Enum(RequestStatus), default=RequestStatus.PENDING)
     priority_score = Column(Integer, default=50)              # نقاط الأولوية (0-100)
     is_urgent = Column(Integer, default=0)                    # علامة استعجال (0 أو 1)
     
@@ -53,4 +57,5 @@ class Request(Base):
     
     # Relationships
     user = relationship("User", back_populates="requests", foreign_keys=[user_id])
+    inspector = relationship("User", back_populates="inspected_requests", foreign_keys=[inspector_id])
     assignments = relationship("Assignment", back_populates="request")

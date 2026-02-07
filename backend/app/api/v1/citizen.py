@@ -64,11 +64,13 @@ def parse_images(images_json: Optional[str]) -> Optional[list[str]]:
 def get_status_arabic(status: RequestStatus) -> str:
     """ترجمة الحالة للعربية"""
     translations = {
+        RequestStatus.PENDING: "معلق - في انتظار المراجعة",
         RequestStatus.NEW: "جديد - في انتظار التكفل",
         RequestStatus.ASSIGNED: "متكفل به",
         RequestStatus.IN_PROGRESS: "قيد التنفيذ",
         RequestStatus.COMPLETED: "مكتمل",
         RequestStatus.CANCELLED: "ملغي",
+        RequestStatus.REJECTED: "مرفوض",
     }
     return translations.get(status, str(status.value))
 
@@ -196,7 +198,7 @@ async def create_request(
         images=images_json,
         priority_score=priority,
         is_urgent=1 if body.is_urgent else 0,
-        status=RequestStatus.NEW,
+        status=RequestStatus.PENDING,
     )
     
     db.add(request)
@@ -365,7 +367,7 @@ async def update_request(
             detail="الطلب غير موجود",
         )
     
-    if request.status != RequestStatus.NEW:
+    if request.status not in (RequestStatus.PENDING, RequestStatus.NEW):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="لا يمكن تعديل الطلب بعد التكفل به",
@@ -448,7 +450,7 @@ async def cancel_request(
             detail="الطلب غير موجود",
         )
     
-    if request.status != RequestStatus.NEW:
+    if request.status not in (RequestStatus.PENDING, RequestStatus.NEW):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="لا يمكن إلغاء الطلب بعد التكفل به",

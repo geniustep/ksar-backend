@@ -3,7 +3,7 @@
 """
 from fastapi import APIRouter
 
-from app.api.v1 import public, auth, admin, organizations, citizen
+from app.api.v1 import public, auth, admin, organizations, citizen, inspector
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -21,3 +21,6 @@ api_router.include_router(organizations.router)
 
 # المواطنون (مقدمو الطلبات)
 api_router.include_router(citizen.router)
+
+# المراقبون
+api_router.include_router(inspector.router)

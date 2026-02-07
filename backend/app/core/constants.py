@@ -6,6 +6,7 @@ class UserRole(str, enum.Enum):
     ADMIN = "admin"           # الإدارة
     ORGANIZATION = "organization"  # المؤسسات
     CITIZEN = "citizen"       # المواطنون (مقدمو الطلبات)
+    INSPECTOR = "inspector"   # المراقبون
 
 
 class UserStatus(str, enum.Enum):
@@ -30,11 +31,13 @@ class RequestCategory(str, enum.Enum):
 
 class RequestStatus(str, enum.Enum):
     """حالات الطلب - مبسطة"""
-    NEW = "new"                   # جديد - في انتظار التكفل
+    PENDING = "pending"           # معلق - في انتظار مراجعة المراقب
+    NEW = "new"                   # جديد - تم التفعيل من المراقب، في انتظار التكفل
     ASSIGNED = "assigned"         # متكفل به - مؤسسة تعهدت بالتنفيذ
     IN_PROGRESS = "in_progress"   # قيد التنفيذ
     COMPLETED = "completed"       # مكتمل - تم التسليم
     CANCELLED = "cancelled"       # ملغي
+    REJECTED = "rejected"         # مرفوض - رفضه المراقب
 
 
 class AssignmentStatus(str, enum.Enum):
