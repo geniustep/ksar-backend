@@ -78,6 +78,12 @@ class InspectorRequestUpdate(BaseModel):
     inspector_notes: Optional[str] = Field(default=None, max_length=2000)
 
 
+class InspectorRequestStatusUpdate(BaseModel):
+    """تحديث حالة الطلب وأهميته"""
+    status: Optional[RequestStatus] = Field(default=None, description="الحالة الجديدة")
+    is_urgent: Optional[int] = Field(default=None, ge=0, le=1, description="مستعجل (0 أو 1)")
+
+
 class InspectorAssignRequest(BaseModel):
     """ربط طلب بجمعية"""
     organization_id: str = Field(..., description="معرف الجمعية")

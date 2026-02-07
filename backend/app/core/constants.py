@@ -3,16 +3,18 @@ import enum
 
 class UserRole(str, enum.Enum):
     """أدوار المستخدمين"""
-    ADMIN = "admin"           # الإدارة
-    ORGANIZATION = "organization"  # المؤسسات
-    CITIZEN = "citizen"       # المواطنون (مقدمو الطلبات)
-    INSPECTOR = "inspector"   # المراقبون
+    SUPERADMIN = "superadmin"     # المدير العام (كل صلاحيات admin)
+    ADMIN = "admin"               # الإدارة
+    ORGANIZATION = "organization" # المؤسسات
+    CITIZEN = "citizen"           # المواطنون (مقدمو الطلبات)
+    INSPECTOR = "inspector"       # المراقبون
 
 
 class UserStatus(str, enum.Enum):
     """حالة المستخدم"""
     ACTIVE = "active"
     SUSPENDED = "suspended"
+    PENDING = "pending"           # في انتظار تفعيل المراقب
 
 
 class RequestCategory(str, enum.Enum):

@@ -18,11 +18,13 @@ from app.models.user import User
 from app.schemas.request import RequestResponse, PaginatedRequests
 from app.schemas.inspector import (
     InspectorRequestUpdate,
+    InspectorRequestStatusUpdate,
     InspectorAssignRequest,
     InspectorRejectRequest,
     InspectorRequestResponse,
     InspectorStatsResponse,
 )
+from app.schemas.organization import InspectorAssignOrgRequest, PhoneCountResponse
 from app.core.constants import RequestStatus, RequestCategory, AssignmentStatus, OrganizationStatus
 
 router = APIRouter(prefix="/inspector", tags=["المراقب - Inspector"])
@@ -270,6 +272,39 @@ async def update_request_notes(
     return {"message": "تم تحديث الملاحظات", "data": RequestResponse.model_validate(req)}
 
 
+@router.patch("/requests/{request_id}/status")
+async def update_request_status(
+    request_id: UUID,
+    body: InspectorRequestStatusUpdate,
+    current_user: User = Depends(get_current_inspector),
+    db: AsyncSession = Depends(get_db),
+):
+    """تحديث حالة الطلب وأهميته"""
+    result = await db.execute(
+        select(Request).where(Request.id == request_id)
+    )
+    req = result.scalar_one_or_none()
+    
+    if not req:
+        raise HTTPException(status_code=404, detail="الطلب غير موجود")
+    
+    if body.status is not None:
+        req.status = body.status
+        # ربط المراقب بالطلب عند تغيير الحالة
+        if not req.inspector_id:
+            req.inspector_id = current_user.id
+        if body.status == RequestStatus.COMPLETED:
+            req.completed_at = datetime.now(timezone.utc)
+    
+    if body.is_urgent is not None:
+        req.is_urgent = body.is_urgent
+    
+    await db.commit()
+    await db.refresh(req)
+    
+    return {"message": "تم تحديث الطلب بنجاح", "data": RequestResponse.model_validate(req)}
+
+
 @router.delete("/requests/{request_id}")
 async def delete_request(
     request_id: UUID,
@@ -296,6 +331,93 @@ async def delete_request(
     await db.commit()
     
     return {"message": "تم حذف الطلب"}
+
+
+# === إضافة مواطن لجمعية ===
+
+@router.post("/requests/{request_id}/assign-org")
+async def assign_request_to_org_with_access(
+    request_id: UUID,
+    body: InspectorAssignOrgRequest,
+    current_user: User = Depends(get_current_inspector),
+    db: AsyncSession = Depends(get_db),
+):
+    """إضافة مواطن لجمعية مع التحكم بخصوصية الهاتف"""
+    # التحقق من وجود الطلب
+    result = await db.execute(
+        select(Request).where(Request.id == request_id)
+    )
+    req = result.scalar_one_or_none()
+    
+    if not req:
+        raise HTTPException(status_code=404, detail="الطلب غير موجود")
+    
+    # يمكن الربط من حالة pending أو new
+    if req.status not in (RequestStatus.PENDING, RequestStatus.NEW):
+        raise HTTPException(
+            status_code=400,
+            detail="يمكن ربط الطلبات المعلقة أو الجديدة فقط بجمعية"
+        )
+    
+    # التحقق من وجود الجمعية
+    org_result = await db.execute(
+        select(Organization).where(Organization.id == body.organization_id)
+    )
+    org = org_result.scalar_one_or_none()
+    
+    if not org:
+        raise HTTPException(status_code=404, detail="الجمعية غير موجودة")
+    
+    if org.status != OrganizationStatus.ACTIVE:
+        raise HTTPException(status_code=400, detail="الجمعية غير نشطة")
+    
+    # التحقق من عدم وجود تكفل نشط
+    existing = await db.execute(
+        select(Assignment).where(
+            Assignment.request_id == request_id,
+            Assignment.status.in_([AssignmentStatus.PLEDGED, AssignmentStatus.IN_PROGRESS])
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="هذا الطلب مرتبط بجمعية بالفعل")
+    
+    # إنشاء التكفل مع خصوصية الهاتف
+    assignment = Assignment(
+        request_id=request_id,
+        org_id=org.id,
+        status=AssignmentStatus.PLEDGED,
+        notes=body.notes,
+        allow_phone_access=body.allow_phone_access or False,
+    )
+    db.add(assignment)
+    
+    # تحديث حالة الطلب
+    if req.status == RequestStatus.PENDING:
+        req.status = RequestStatus.NEW
+    req.status = RequestStatus.ASSIGNED
+    req.inspector_id = current_user.id
+    
+    await db.commit()
+    
+    return {"message": f"تم ربط الطلب بجمعية {org.name} بنجاح"}
+
+
+@router.get("/phone-count", response_model=PhoneCountResponse)
+async def get_phone_request_count(
+    phone: str = Query(..., description="رقم الهاتف للبحث"),
+    current_user: User = Depends(get_current_inspector),
+    db: AsyncSession = Depends(get_db),
+):
+    """عدد الطلبات لرقم هاتف معين"""
+    # تنظيف رقم الهاتف
+    clean_phone = phone.replace(' ', '').replace('-', '')
+    
+    count_result = await db.execute(
+        select(func.count(Request.id)).where(Request.requester_phone == clean_phone)
+    )
+    count = count_result.scalar() or 0
+    
+    return PhoneCountResponse(phone=clean_phone, count=count)
 
 
 # === الإحصائيات ===

@@ -26,6 +26,7 @@ from app.schemas.auth import (
     InspectorLoginResponse,
 )
 from app.schemas.inspector import InspectorLoginRequest
+from app.schemas.organization import OrgLoginRequest
 from app.core.security import (
     verify_password,
     hash_password,
@@ -130,7 +131,7 @@ async def login(
             detail="البريد الإلكتروني أو كلمة المرور غير صحيحة",
         )
     
-    if user.status.value != "active":
+    if user.status.value == "suspended":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="الحساب معطل",
@@ -201,7 +202,7 @@ async def phone_register(
     
     if user:
         # المستخدم موجود - تسجيل دخول مباشر
-        if user.status.value != "active":
+        if user.status.value == "suspended":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="الحساب معطل",
@@ -222,7 +223,7 @@ async def phone_register(
             full_name=body.full_name or f"مواطن {phone[-4:]}",
             phone=phone,
             role=UserRole.CITIZEN,
-            status=UserStatus.ACTIVE,
+            status=UserStatus.PENDING,  # حالة معلقة حتى يفعّله المراقب
         )
         
         db.add(user)
@@ -462,6 +463,75 @@ async def inspector_login(
             full_name=user.full_name,
             phone=user.phone,
             role=user.role,
+        ),
+    )
+
+
+@router.post("/org-login", response_model=LoginResponse)
+async def org_login(
+    body: OrgLoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    تسجيل دخول المؤسسة بالهاتف + الكود
+    
+    - الكود يُقدم من الأدمين عند إنشاء حساب المؤسسة
+    """
+    # تنظيف رقم الهاتف
+    phone = body.phone.replace(' ', '').replace('-', '')
+    
+    # البحث عن المؤسسة بالهاتف
+    result = await db.execute(
+        select(User).where(User.phone == phone, User.role == UserRole.ORGANIZATION)
+    )
+    user = result.scalar_one_or_none()
+    
+    if not user or not verify_password(body.code, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="رقم الهاتف أو كود الدخول غير صحيح",
+        )
+    
+    if user.status.value != "active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="الحساب معطل",
+        )
+    
+    # تحديث وقت آخر دخول
+    user.last_login = datetime.now(timezone.utc)
+    await db.commit()
+    
+    # الحصول على بيانات المؤسسة
+    org_id = None
+    org_name = None
+    org_result = await db.execute(
+        select(Organization).where(Organization.user_id == user.id)
+    )
+    org = org_result.scalar_one_or_none()
+    if org:
+        org_id = str(org.id)
+        org_name = org.name
+    
+    # إنشاء التوكن
+    access_token = create_access_token(
+        data={
+            "sub": str(user.id),
+            "role": user.role.value,
+            "org_id": org_id,
+        }
+    )
+    
+    return LoginResponse(
+        access_token=access_token,
+        user=UserResponse(
+            id=str(user.id),
+            email=user.email,
+            full_name=user.full_name,
+            phone=user.phone,
+            role=user.role,
+            organization_id=org_id,
+            organization_name=org_name,
         ),
     )
 

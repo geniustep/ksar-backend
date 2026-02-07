@@ -218,12 +218,15 @@ async def get_assignment_detail(
     )
     request = request_result.scalar_one_or_none()
     
+    # خصوصية الهاتف: إذا لم يكن للمؤسسة إذن، نُخفي رقم الهاتف
+    phone = request.requester_phone if assignment.allow_phone_access else None
+    
     return {
         "assignment": AssignmentResponse.model_validate(assignment),
         "request": {
             "id": str(request.id),
             "requester_name": request.requester_name,
-            "requester_phone": request.requester_phone,
+            "requester_phone": phone,
             "category": request.category.value,
             "description": request.description,
             "quantity": request.quantity,
