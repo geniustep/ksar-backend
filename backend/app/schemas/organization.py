@@ -9,6 +9,27 @@ import re
 from pydantic import BaseModel, Field, field_validator
 
 
+# === تسجيل مؤسسة (عام) ===
+
+class OrgRegisterRequest(BaseModel):
+    """تسجيل مؤسسة جديدة (عام - بدون تسجيل دخول)"""
+    name: str = Field(..., min_length=2, max_length=200, description="اسم المؤسسة")
+    phone: str = Field(..., min_length=10, max_length=20, description="رقم هاتف المؤسسة")
+    email: Optional[str] = Field(default=None, max_length=100, description="البريد الإلكتروني")
+    description: Optional[str] = Field(default=None, max_length=2000, description="وصف المؤسسة ونشاطها")
+    city: Optional[str] = Field(default=None, max_length=100, description="المدينة")
+    region: Optional[str] = Field(default=None, max_length=100, description="المنطقة")
+    responsible_name: Optional[str] = Field(default=None, max_length=100, description="اسم المسؤول")
+
+    @field_validator('phone')
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        phone = re.sub(r'[\s\-]', '', v)
+        if not re.match(r'^(\+?[0-9]{10,15})$', phone):
+            raise ValueError('رقم الهاتف غير صالح')
+        return phone
+
+
 # === إنشاء مؤسسة (أدمين) ===
 
 class OrganizationCreateRequest(BaseModel):

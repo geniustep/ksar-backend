@@ -2,6 +2,7 @@
 واجهة عامة - للاستعلام والتتبع (بدون تسجيل)
 """
 import hashlib
+import secrets
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,8 +13,11 @@ from app.database import get_db
 from app.models.request import Request
 from app.models.assignment import Assignment
 from app.models.organization import Organization
+from app.models.user import User
 from app.schemas.request import RequestTrackResponse
-from app.core.constants import RequestStatus
+from app.schemas.organization import OrgRegisterRequest
+from app.core.constants import RequestStatus, UserRole, UserStatus, OrganizationStatus
+from app.core.security import hash_password
 
 router = APIRouter(prefix="/public", tags=["عام - Public"])
 
@@ -106,3 +110,80 @@ async def get_categories():
         {"value": "other", "label": "أخرى", "label_ar": "أخرى"},
     ]
     return {"data": categories}
+
+
+@router.post("/org-register")
+async def register_organization(
+    body: OrgRegisterRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    تسجيل مؤسسة جديدة (عام - بدون تسجيل دخول)
+    
+    المؤسسة تُنشأ بحالة "معلقة" وتنتظر موافقة الأدمين.
+    """
+    # تنظيف رقم الهاتف
+    phone = body.phone.replace(' ', '').replace('-', '')
+    
+    # التحقق من عدم وجود الهاتف مسبقاً
+    phone_result = await db.execute(
+        select(User).where(User.phone == phone)
+    )
+    if phone_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=400,
+            detail="رقم الهاتف مستخدم بالفعل. إذا كان لديك حساب، استخدم صفحة دخول المؤسسات.",
+        )
+    
+    # التحقق من البريد الإلكتروني
+    email = body.email
+    if email:
+        email = email.lower().strip()
+        email_result = await db.execute(
+            select(User).where(User.email == email)
+        )
+        if email_result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=400,
+                detail="البريد الإلكتروني مستخدم بالفعل",
+            )
+    else:
+        random_suffix = secrets.token_hex(4)
+        email = f"org_{phone}_{random_suffix}@org.ksar.local"
+    
+    # توليد كود دخول من 6 أرقام
+    access_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+    
+    # إنشاء المستخدم بحالة معلقة
+    user = User(
+        email=email,
+        password_hash=hash_password(access_code),
+        access_code=access_code,
+        full_name=body.responsible_name or body.name,
+        phone=phone,
+        city=body.city,
+        region=body.region,
+        role=UserRole.ORGANIZATION,
+        status=UserStatus.SUSPENDED,  # معلق حتى يوافق الأدمين
+    )
+    
+    db.add(user)
+    await db.flush()
+    
+    # إنشاء سجل المؤسسة
+    org = Organization(
+        user_id=user.id,
+        name=body.name,
+        description=body.description,
+        contact_phone=phone,
+        contact_email=body.email,
+        status=OrganizationStatus.SUSPENDED,  # معلقة حتى الموافقة
+    )
+    
+    db.add(org)
+    await db.commit()
+    
+    return {
+        "message": "تم تسجيل المؤسسة بنجاح. سيتم مراجعة طلبك من الإدارة وسيتم إرسال بيانات الدخول عند الموافقة.",
+        "organization_name": body.name,
+    }
