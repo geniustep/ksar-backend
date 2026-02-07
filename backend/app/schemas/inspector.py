@@ -49,6 +49,7 @@ class InspectorResponse(BaseModel):
     full_name: str
     phone: Optional[str] = None
     status: str
+    access_code: Optional[str] = None
     created_at: datetime
     last_login: Optional[datetime] = None
 

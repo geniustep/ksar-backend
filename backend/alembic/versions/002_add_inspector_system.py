@@ -41,7 +41,10 @@ def upgrade() -> None:
     )
     op.create_index('ix_requests_inspector_id', 'requests', ['inspector_id'])
     
-    # 5. Update existing requests from 'new' default to keep them as 'new'
+    # 5. Add access_code column to users table (plain text code for admin viewing)
+    op.add_column('users', sa.Column('access_code', sa.String(10), nullable=True))
+    
+    # 6. Update existing requests from 'new' default to keep them as 'new'
     # (existing requests should stay as 'new', only new ones will be 'pending')
 
 
@@ -55,6 +58,9 @@ def downgrade() -> None:
     # Remove columns
     op.drop_column('requests', 'inspector_notes')
     op.drop_column('requests', 'inspector_id')
+    
+    # Remove access_code column from users
+    op.drop_column('users', 'access_code')
     
     # Note: PostgreSQL doesn't support removing values from enums easily.
     # The enum values (inspector, pending, rejected) will remain but won't be used.

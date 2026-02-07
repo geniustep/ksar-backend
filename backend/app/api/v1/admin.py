@@ -419,6 +419,7 @@ async def create_inspector(
     user = User(
         email=temp_email,
         password_hash=hash_password(access_code),
+        access_code=access_code,
         full_name=body.full_name,
         phone=phone,
         role=UserRole.INSPECTOR,
@@ -436,6 +437,7 @@ async def create_inspector(
             full_name=user.full_name,
             phone=user.phone,
             status=user.status.value,
+            access_code=access_code,
             created_at=user.created_at,
             last_login=user.last_login,
         ),
@@ -473,6 +475,7 @@ async def get_inspectors(
                 full_name=u.full_name,
                 phone=u.phone,
                 status=u.status.value,
+                access_code=u.access_code,
                 created_at=u.created_at,
                 last_login=u.last_login,
             )
@@ -526,6 +529,7 @@ async def regenerate_inspector_code(
     # توليد كود جديد
     access_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
     inspector.password_hash = hash_password(access_code)
+    inspector.access_code = access_code
     
     await db.commit()
     

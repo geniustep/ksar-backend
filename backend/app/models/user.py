@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, Boolean, DateTime, Enum, func
+from sqlalchemy import Column, String, Boolean, DateTime, Enum, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -18,6 +18,9 @@ class User(Base):
     # بيانات الدخول
     email = Column(String(100), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
+    
+    # كود الدخول للمراقبين (نص صريح للأدمين)
+    access_code = Column(String(10), nullable=True)
     
     # البيانات الأساسية
     full_name = Column(String(100), nullable=False)
