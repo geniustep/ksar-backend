@@ -45,7 +45,7 @@ async def get_current_user(
             detail="المستخدم غير موجود",
         )
     
-    if user.status.value != "active":
+    if user.status.value == "suspended":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="الحساب معطل",
@@ -57,8 +57,8 @@ async def get_current_user(
 async def get_current_admin(
     current_user: User = Depends(get_current_user),
 ) -> User:
-    """التحقق من صلاحيات الإدارة"""
-    if current_user.role != UserRole.ADMIN:
+    """التحقق من صلاحيات الإدارة (admin أو superadmin)"""
+    if current_user.role not in (UserRole.ADMIN, UserRole.SUPERADMIN):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="هذه العملية تتطلب صلاحيات الإدارة",

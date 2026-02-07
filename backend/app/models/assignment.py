@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Column, String, Text, DateTime, Enum, ForeignKey, func
+from sqlalchemy import Column, String, Boolean, Text, DateTime, Enum, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -18,6 +18,9 @@ class Assignment(Base):
 
     # الحالة
     status = Column(Enum(AssignmentStatus), default=AssignmentStatus.PLEDGED)
+    
+    # خصوصية الهاتف - هل يُسمح للمؤسسة برؤية رقم الهاتف
+    allow_phone_access = Column(Boolean, default=False, nullable=False)
     
     # تفاصيل التنفيذ
     notes = Column(Text, nullable=True)                       # ملاحظات المؤسسة

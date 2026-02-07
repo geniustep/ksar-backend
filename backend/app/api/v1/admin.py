@@ -1,5 +1,5 @@
 """
-واجهة الإدارة - مراقبة الطلبات والتحليلات
+واجهة الإدارة - مراقبة الطلبات والتحليلات وإدارة المؤسسات والمواطنين
 """
 from typing import Optional
 from uuid import UUID
@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func, case, and_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.database import get_db
 from app.api.deps import get_current_admin
@@ -22,13 +23,21 @@ from app.schemas.request import (
     PaginatedRequests,
 )
 from app.schemas.assignment import AssignmentBriefResponse
-from app.core.constants import RequestStatus, RequestCategory, AssignmentStatus, UserRole, UserStatus
+from app.core.constants import RequestStatus, RequestCategory, AssignmentStatus, UserRole, UserStatus, OrganizationStatus
 from app.core.security import hash_password
 from app.schemas.inspector import (
     InspectorCreateRequest,
     InspectorResponse,
     InspectorCreatedResponse,
     InspectorListResponse,
+)
+from app.schemas.organization import (
+    OrganizationCreateRequest,
+    OrganizationResponse,
+    OrganizationCreatedResponse,
+    CitizenResponse,
+    CitizenListResponse,
+    OrgAccessRequest,
 )
 
 router = APIRouter(prefix="/admin", tags=["الإدارة - Admin"])
@@ -361,6 +370,172 @@ async def get_organizations(
     }
 
 
+@router.post("/organizations", response_model=OrganizationCreatedResponse, status_code=201)
+async def create_organization(
+    body: OrganizationCreateRequest,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """إنشاء مؤسسة جديدة (نفس نمط إنشاء المراقب - توليد كود دخول من 6 أرقام)"""
+    import secrets
+    
+    # تنظيف رقم الهاتف
+    phone = body.phone.replace(' ', '').replace('-', '')
+    
+    # التحقق من عدم وجود الهاتف مسبقاً
+    phone_result = await db.execute(
+        select(User).where(User.phone == phone)
+    )
+    if phone_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=400,
+            detail="رقم الهاتف مستخدم بالفعل",
+        )
+    
+    # توليد كود دخول من 6 أرقام
+    access_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+    
+    # إنشاء بريد إلكتروني وهمي فريد (إن لم يُرسل)
+    email = body.email
+    if not email:
+        random_suffix = secrets.token_hex(4)
+        email = f"org_{phone}_{random_suffix}@org.ksar.local"
+    else:
+        # التحقق من عدم وجود البريد مسبقاً
+        email_result = await db.execute(
+            select(User).where(User.email == email.lower())
+        )
+        if email_result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=400,
+                detail="البريد الإلكتروني مستخدم بالفعل",
+            )
+        email = email.lower()
+    
+    # إنشاء المستخدم
+    user = User(
+        email=email,
+        password_hash=hash_password(access_code),
+        full_name=body.name,
+        phone=phone,
+        city=body.city,
+        region=body.region,
+        role=UserRole.ORGANIZATION,
+        status=UserStatus.ACTIVE,
+    )
+    
+    db.add(user)
+    await db.flush()
+    
+    # إنشاء سجل المؤسسة
+    org = Organization(
+        user_id=user.id,
+        name=body.name,
+        description=body.description,
+        contact_phone=phone,
+        contact_email=body.email,
+        status=OrganizationStatus.ACTIVE,
+    )
+    
+    db.add(org)
+    await db.commit()
+    await db.refresh(org)
+    
+    return OrganizationCreatedResponse(
+        message="تم إنشاء المؤسسة بنجاح",
+        organization=OrganizationResponse(
+            id=str(org.id),
+            name=org.name,
+            contact_phone=org.contact_phone,
+            contact_email=org.contact_email,
+            description=org.description,
+            status=org.status.value,
+            total_completed=org.total_completed or 0,
+            created_at=org.created_at,
+            updated_at=org.updated_at,
+        ),
+        access_code=access_code,
+    )
+
+
+@router.post("/organizations/{org_id}/regenerate-code")
+async def regenerate_organization_code(
+    org_id: UUID,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """إعادة توليد كود دخول المؤسسة"""
+    import secrets
+    
+    result = await db.execute(
+        select(Organization).where(Organization.id == org_id)
+    )
+    org = result.scalar_one_or_none()
+    
+    if not org:
+        raise HTTPException(status_code=404, detail="المؤسسة غير موجودة")
+    
+    # الحصول على المستخدم المرتبط
+    user_result = await db.execute(
+        select(User).where(User.id == org.user_id)
+    )
+    user = user_result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="حساب المؤسسة غير موجود")
+    
+    # توليد كود جديد
+    access_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+    user.password_hash = hash_password(access_code)
+    
+    await db.commit()
+    
+    return {
+        "message": "تم إعادة توليد كود الدخول",
+        "access_code": access_code,
+    }
+
+
+@router.delete("/organizations/{org_id}")
+async def delete_organization(
+    org_id: UUID,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """حذف مؤسسة"""
+    result = await db.execute(
+        select(Organization).where(Organization.id == org_id)
+    )
+    org = result.scalar_one_or_none()
+    
+    if not org:
+        raise HTTPException(status_code=404, detail="المؤسسة غير موجودة")
+    
+    # حذف التكفلات المرتبطة
+    await db.execute(
+        select(Assignment).where(Assignment.org_id == org_id)
+    )
+    assignments_result = await db.execute(
+        select(Assignment).where(Assignment.org_id == org_id)
+    )
+    for assignment in assignments_result.scalars().all():
+        await db.delete(assignment)
+    
+    # حذف المستخدم المرتبط
+    user_result = await db.execute(
+        select(User).where(User.id == org.user_id)
+    )
+    user = user_result.scalar_one_or_none()
+    
+    await db.delete(org)
+    if user:
+        await db.delete(user)
+    
+    await db.commit()
+    
+    return {"message": "تم حذف المؤسسة"}
+
+
 @router.patch("/organizations/{org_id}/status")
 async def update_organization_status(
     org_id: UUID,
@@ -554,3 +729,175 @@ async def delete_inspector(
     await db.commit()
     
     return {"message": "تم حذف المراقب"}
+
+
+# === إدارة المواطنين ===
+
+@router.get("/citizens", response_model=CitizenListResponse)
+async def get_citizens(
+    status: Optional[str] = Query(default=None, description="فلتر حسب الحالة (active/suspended/pending)"),
+    search: Optional[str] = Query(default=None, description="بحث بالاسم أو الهاتف"),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """قائمة المواطنين مع عدد الطلبات والمراقب المسؤول"""
+    query = select(User).where(User.role == UserRole.CITIZEN)
+    
+    if status:
+        query = query.where(User.status == UserStatus(status))
+    
+    if search:
+        query = query.where(
+            (User.full_name.ilike(f"%{search}%")) |
+            (User.phone.ilike(f"%{search}%"))
+        )
+    
+    # العدد الإجمالي
+    count_query = select(func.count()).select_from(query.subquery())
+    total = (await db.execute(count_query)).scalar()
+    
+    # الترتيب والتصفح
+    query = query.order_by(User.created_at.desc())
+    query = query.offset((page - 1) * limit).limit(limit)
+    
+    result = await db.execute(query)
+    citizens = result.scalars().all()
+    
+    # بناء الاستجابة مع البيانات الإضافية
+    items = []
+    for citizen in citizens:
+        # عدد الطلبات
+        req_count_result = await db.execute(
+            select(func.count(Request.id)).where(Request.user_id == citizen.id)
+        )
+        total_requests = req_count_result.scalar() or 0
+        
+        # المراقب المسؤول (أول من فعّل طلباً لهذا المواطن)
+        supervisor_result = await db.execute(
+            select(Request.inspector_id)
+            .where(
+                Request.user_id == citizen.id,
+                Request.inspector_id.is_not(None),
+            )
+            .order_by(Request.created_at)
+            .limit(1)
+        )
+        supervisor_id_val = supervisor_result.scalar_one_or_none()
+        
+        supervisor_name = None
+        if supervisor_id_val:
+            sup_user_result = await db.execute(
+                select(User.full_name).where(User.id == supervisor_id_val)
+            )
+            supervisor_name = sup_user_result.scalar_one_or_none()
+        
+        items.append(CitizenResponse(
+            id=str(citizen.id),
+            full_name=citizen.full_name,
+            phone=citizen.phone,
+            email=citizen.email if not citizen.email.endswith("@temp.ksar.local") else None,
+            city=citizen.city,
+            region=citizen.region,
+            status=citizen.status.value,
+            total_requests=total_requests,
+            supervisor_id=str(supervisor_id_val) if supervisor_id_val else None,
+            supervisor_name=supervisor_name,
+            created_at=citizen.created_at,
+            last_login=citizen.last_login,
+        ))
+    
+    return CitizenListResponse(
+        items=items,
+        total=total,
+        page=page,
+        limit=limit,
+    )
+
+
+@router.patch("/citizens/{citizen_id}/status")
+async def update_citizen_status(
+    citizen_id: UUID,
+    status: str = Query(..., description="الحالة الجديدة (active/suspended)"),
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """تغيير حالة مواطن"""
+    result = await db.execute(
+        select(User).where(User.id == citizen_id, User.role == UserRole.CITIZEN)
+    )
+    citizen = result.scalar_one_or_none()
+    
+    if not citizen:
+        raise HTTPException(status_code=404, detail="المواطن غير موجود")
+    
+    citizen.status = UserStatus(status)
+    await db.commit()
+    
+    return {"message": f"تم تحديث حالة المواطن إلى {status}"}
+
+
+@router.delete("/citizens/{citizen_id}")
+async def delete_citizen(
+    citizen_id: UUID,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """حذف مواطن"""
+    result = await db.execute(
+        select(User).where(User.id == citizen_id, User.role == UserRole.CITIZEN)
+    )
+    citizen = result.scalar_one_or_none()
+    
+    if not citizen:
+        raise HTTPException(status_code=404, detail="المواطن غير موجود")
+    
+    # حذف الطلبات المرتبطة بالمواطن
+    requests_result = await db.execute(
+        select(Request).where(Request.user_id == citizen_id)
+    )
+    for req in requests_result.scalars().all():
+        # حذف التكفلات المرتبطة بالطلب
+        assignments_result = await db.execute(
+            select(Assignment).where(Assignment.request_id == req.id)
+        )
+        for assignment in assignments_result.scalars().all():
+            await db.delete(assignment)
+        await db.delete(req)
+    
+    await db.delete(citizen)
+    await db.commit()
+    
+    return {"message": "تم حذف المواطن"}
+
+
+# === التحكم بخصوصية الهاتف ===
+
+@router.post("/org-access")
+async def manage_org_phone_access(
+    body: OrgAccessRequest,
+    current_user: User = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """السماح/منع جمعية من رؤية رقم الهاتف"""
+    # التحقق من وجود التكفل
+    result = await db.execute(
+        select(Assignment).where(
+            Assignment.request_id == body.request_id,
+            Assignment.org_id == body.organization_id,
+        )
+    )
+    assignment = result.scalar_one_or_none()
+    
+    if not assignment:
+        raise HTTPException(
+            status_code=404,
+            detail="لم يتم العثور على تكفل لهذا الطلب والمؤسسة"
+        )
+    
+    assignment.allow_phone_access = body.allow_phone_access
+    await db.commit()
+    
+    status_text = "السماح" if body.allow_phone_access else "المنع"
+    return {"message": f"تم {status_text} من رؤية رقم الهاتف"}
