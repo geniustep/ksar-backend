@@ -64,6 +64,8 @@ _DEFAULT_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:3001",
     "http://127.0.0.1:3001",
+    "http://localhost:4500",
+    "http://127.0.0.1:4500",
 ]
 _CORS_ORIGINS = list(dict.fromkeys(settings.allowed_origins_list + _DEFAULT_ORIGINS))
 
