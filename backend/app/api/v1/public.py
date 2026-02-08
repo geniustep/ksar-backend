@@ -16,7 +16,7 @@ from app.models.organization import Organization
 from app.models.user import User
 from app.schemas.request import RequestTrackResponse
 from app.schemas.organization import OrgRegisterRequest
-from app.core.constants import RequestStatus, UserRole, UserStatus, OrganizationStatus
+from app.core.constants import RequestStatus, UserRole, UserStatus, OrganizationStatus, AssignmentStatus
 from app.core.security import hash_password
 
 router = APIRouter(prefix="/public", tags=["عام - Public"])
@@ -68,7 +68,7 @@ async def track_request(
             assignment_result = await db.execute(
                 select(Assignment).where(
                     Assignment.request_id == req.id,
-                    Assignment.status != "failed"
+                    Assignment.status != AssignmentStatus.FAILED
                 )
             )
             assignment = assignment_result.scalar_one_or_none()

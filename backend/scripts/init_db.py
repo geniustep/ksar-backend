@@ -2,8 +2,13 @@
 سكريبت إنشاء قاعدة البيانات والمستخدم الأول
 """
 import asyncio
+import os
 import sys
-sys.path.insert(0, '/app')
+
+# دعم التشغيل من Docker (/app) أو محلياً (backend/)
+_APP_ROOT = os.environ.get("APP_DIR", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _APP_ROOT not in sys.path:
+    sys.path.insert(0, _APP_ROOT)
 
 from sqlalchemy import text
 from app.database import engine, Base

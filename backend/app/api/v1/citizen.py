@@ -20,7 +20,7 @@ from app.schemas.request import (
     RequestResponse,
     PaginatedRequests,
 )
-from app.core.constants import RequestStatus, RequestCategory, CATEGORY_WEIGHTS
+from app.core.constants import RequestStatus, RequestCategory, CATEGORY_WEIGHTS, AssignmentStatus
 
 
 router = APIRouter(prefix="/citizen", tags=["المواطنون - Citizens"])
@@ -241,7 +241,7 @@ async def get_my_requests(
         assignment_result = await db.execute(
             select(Assignment).where(
                 Assignment.request_id == req.id,
-                Assignment.status != "failed"
+                Assignment.status != AssignmentStatus.FAILED
             )
         )
         assignment = assignment_result.scalar_one_or_none()
@@ -307,7 +307,7 @@ async def get_request_detail(
     assignment_result = await db.execute(
         select(Assignment).where(
             Assignment.request_id == request.id,
-            Assignment.status != "failed"
+            Assignment.status != AssignmentStatus.FAILED
         )
     )
     assignment = assignment_result.scalar_one_or_none()
