@@ -151,8 +151,9 @@ async def register_organization(
         random_suffix = secrets.token_hex(4)
         email = f"org_{phone}_{random_suffix}@org.ksar.local"
     
-    # توليد كود دخول من 6 أرقام
-    access_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+    # توليد كود دخول من 8 أحرف أبجدية رقمية (بدون أحرف ملتبسة)
+    alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+    access_code = ''.join(secrets.choice(alphabet) for _ in range(8))
     
     # إنشاء المستخدم بحالة معلقة
     user = User(

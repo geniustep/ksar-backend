@@ -376,8 +376,9 @@ async def create_organization(
     current_user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """إنشاء مؤسسة جديدة (نفس نمط إنشاء المراقب - توليد كود دخول من 6 أرقام)"""
+    """إنشاء مؤسسة جديدة (نفس نمط إنشاء المراقب - توليد كود دخول)"""
     import secrets
+    import string
     
     # تنظيف رقم الهاتف
     phone = body.phone.replace(' ', '').replace('-', '')
@@ -392,8 +393,9 @@ async def create_organization(
             detail="رقم الهاتف مستخدم بالفعل",
         )
     
-    # توليد كود دخول من 6 أرقام
-    access_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+    # توليد كود دخول من 8 أحرف أبجدية رقمية (بدون أحرف ملتبسة)
+    alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+    access_code = ''.join(secrets.choice(alphabet) for _ in range(8))
     
     # إنشاء بريد إلكتروني وهمي فريد (إن لم يُرسل)
     email = body.email
@@ -485,8 +487,9 @@ async def regenerate_organization_code(
     if not user:
         raise HTTPException(status_code=404, detail="حساب المؤسسة غير موجود")
     
-    # توليد كود جديد
-    access_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+    # توليد كود جديد من 8 أحرف أبجدية رقمية
+    alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+    access_code = ''.join(secrets.choice(alphabet) for _ in range(8))
     user.password_hash = hash_password(access_code)
     user.access_code = access_code
     
@@ -585,8 +588,9 @@ async def create_inspector(
             detail="رقم الهاتف مستخدم بالفعل",
         )
     
-    # توليد كود دخول من 6 أرقام
-    access_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+    # توليد كود دخول من 8 أحرف أبجدية رقمية (بدون أحرف ملتبسة)
+    alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+    access_code = ''.join(secrets.choice(alphabet) for _ in range(8))
     
     # إنشاء بريد إلكتروني وهمي فريد
     random_suffix = secrets.token_hex(4)
@@ -706,13 +710,17 @@ async def regenerate_inspector_code(
     
     # استخدام كود مخصص إن وُجد، وإلا توليد تلقائي
     if custom_code:
-        # التحقق من صحة الكود المخصص (6 أرقام)
-        custom_code = custom_code.strip()
-        if not custom_code.isdigit() or len(custom_code) != 6:
-            raise HTTPException(status_code=400, detail="الكود يجب أن يكون 6 أرقام")
+        # التحقق من صحة الكود المخصص (4-8 أحرف أبجدية رقمية)
+        custom_code = custom_code.strip().upper()
+        if len(custom_code) < 4 or len(custom_code) > 8:
+            raise HTTPException(status_code=400, detail="الكود يجب أن يكون بين 4 و 8 أحرف")
+        if not custom_code.isalnum():
+            raise HTTPException(status_code=400, detail="الكود يجب أن يحتوي على أحرف وأرقام فقط")
         access_code = custom_code
     else:
-        access_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+        # توليد كود من 8 أحرف أبجدية رقمية (بدون أحرف ملتبسة)
+        alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
+        access_code = ''.join(secrets.choice(alphabet) for _ in range(8))
     
     inspector.password_hash = hash_password(access_code)
     inspector.access_code = access_code

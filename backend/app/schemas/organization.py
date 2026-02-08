@@ -85,7 +85,7 @@ class OrganizationListResponse(BaseModel):
 class OrgLoginRequest(BaseModel):
     """طلب تسجيل دخول المؤسسة بالهاتف + الكود"""
     phone: str = Field(..., min_length=10, max_length=20, description="رقم الهاتف")
-    code: str = Field(..., min_length=6, max_length=6, description="كود الدخول")
+    code: str = Field(..., min_length=4, max_length=8, description="كود الدخول")
 
     @field_validator('phone')
     @classmethod
