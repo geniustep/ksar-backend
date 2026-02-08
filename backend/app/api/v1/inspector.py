@@ -32,7 +32,7 @@ router = APIRouter(prefix="/inspector", tags=["المراقب - Inspector"])
 
 # === الطلبات ===
 
-@router.get("/requests", response_model=PaginatedRequests)
+@router.get("/requests")
 async def get_requests(
     status: Optional[RequestStatus] = Query(default=None),
     category: Optional[RequestCategory] = Query(default=None),
@@ -45,7 +45,7 @@ async def get_requests(
     current_user: User = Depends(get_current_inspector),
     db: AsyncSession = Depends(get_db),
 ):
-    """عرض الطلبات مع الفلترة"""
+    """عرض الطلبات مع الفلترة وعدد التعهدات"""
     query = select(Request)
     
     # الفلاتر
@@ -84,13 +84,28 @@ async def get_requests(
     result = await db.execute(query)
     requests = result.scalars().all()
     
-    return PaginatedRequests(
-        items=[RequestResponse.model_validate(r) for r in requests],
-        total=total,
-        page=page,
-        limit=limit,
-        has_more=(page * limit) < total,
-    )
+    # إضافة عدد التعهدات لكل طلب
+    items = []
+    for r in requests:
+        pledge_count_result = await db.execute(
+            select(func.count(Assignment.id)).where(
+                Assignment.request_id == r.id,
+                Assignment.status == AssignmentStatus.PLEDGED,
+            )
+        )
+        pledge_count = pledge_count_result.scalar() or 0
+        
+        req_data = RequestResponse.model_validate(r).model_dump()
+        req_data["pledge_count"] = pledge_count
+        items.append(req_data)
+    
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "has_more": (page * limit) < total,
+    }
 
 
 @router.get("/requests/{request_id}", response_model=InspectorRequestResponse)
@@ -453,6 +468,143 @@ async def get_stats(
         rejected_count=rejected_count,
         assigned_count=assigned_count,
     )
+
+
+# === التعهدات والموافقة ===
+
+@router.get("/requests/{request_id}/pledges")
+async def get_request_pledges(
+    request_id: UUID,
+    current_user: User = Depends(get_current_inspector),
+    db: AsyncSession = Depends(get_db),
+):
+    """قائمة المؤسسات المتعهدة بطلب معين"""
+    # التحقق من وجود الطلب
+    req_result = await db.execute(
+        select(Request).where(Request.id == request_id)
+    )
+    req = req_result.scalar_one_or_none()
+    if not req:
+        raise HTTPException(status_code=404, detail="الطلب غير موجود")
+    
+    # جلب التعهدات النشطة (PLEDGED)
+    pledges_result = await db.execute(
+        select(Assignment, Organization)
+        .join(Organization, Assignment.org_id == Organization.id)
+        .where(
+            Assignment.request_id == request_id,
+            Assignment.status == AssignmentStatus.PLEDGED,
+        )
+        .order_by(Assignment.created_at.asc())
+    )
+    pledges = pledges_result.all()
+    
+    # جلب التعهد المعتمد (IN_PROGRESS أو COMPLETED) إن وجد
+    approved_result = await db.execute(
+        select(Assignment, Organization)
+        .join(Organization, Assignment.org_id == Organization.id)
+        .where(
+            Assignment.request_id == request_id,
+            Assignment.status.in_([AssignmentStatus.IN_PROGRESS, AssignmentStatus.COMPLETED]),
+        )
+    )
+    approved = approved_result.first()
+    
+    return {
+        "request_id": str(request_id),
+        "request_status": req.status.value,
+        "pledge_count": len(pledges),
+        "pledges": [
+            {
+                "assignment_id": str(a.id),
+                "org_id": str(o.id),
+                "org_name": o.name,
+                "org_phone": o.contact_phone,
+                "org_email": o.contact_email,
+                "org_total_completed": o.total_completed or 0,
+                "notes": a.notes,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+            }
+            for a, o in pledges
+        ],
+        "approved": {
+            "assignment_id": str(approved[0].id),
+            "org_name": approved[1].name,
+            "org_phone": approved[1].contact_phone,
+            "status": approved[0].status.value,
+        } if approved else None,
+    }
+
+
+@router.post("/requests/{request_id}/approve-org")
+async def approve_organization_for_request(
+    request_id: UUID,
+    assignment_id: UUID = Query(..., description="معرف التعهد المراد الموافقة عليه"),
+    show_citizen_phone: bool = Query(default=False, description="إظهار رقم المواطن للمؤسسة"),
+    contact_name: Optional[str] = Query(default=None, description="اسم التواصل البديل"),
+    contact_phone: Optional[str] = Query(default=None, description="رقم التواصل البديل"),
+    current_user: User = Depends(get_current_inspector),
+    db: AsyncSession = Depends(get_db),
+):
+    """الموافقة على مؤسسة لطلب معين"""
+    # التحقق من الطلب
+    req_result = await db.execute(
+        select(Request).where(Request.id == request_id)
+    )
+    req = req_result.scalar_one_or_none()
+    if not req:
+        raise HTTPException(status_code=404, detail="الطلب غير موجود")
+    
+    if req.status != RequestStatus.NEW:
+        raise HTTPException(status_code=400, detail="الطلب ليس في حالة تسمح بالموافقة (يجب أن يكون مفعّلاً)")
+    
+    # التحقق من التعهد
+    assignment_result = await db.execute(
+        select(Assignment).where(
+            Assignment.id == assignment_id,
+            Assignment.request_id == request_id,
+            Assignment.status == AssignmentStatus.PLEDGED,
+        )
+    )
+    assignment = assignment_result.scalar_one_or_none()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="التعهد غير موجود أو تم معالجته مسبقاً")
+    
+    # الموافقة على هذا التعهد
+    assignment.status = AssignmentStatus.IN_PROGRESS
+    assignment.allow_phone_access = show_citizen_phone
+    assignment.contact_name = contact_name.strip() if contact_name else None
+    assignment.contact_phone = contact_phone.strip() if contact_phone else None
+    assignment.inspector_phone = current_user.phone  # رقم المراقب
+    
+    # رفض جميع التعهدات الأخرى لنفس الطلب
+    other_pledges = await db.execute(
+        select(Assignment).where(
+            Assignment.request_id == request_id,
+            Assignment.id != assignment_id,
+            Assignment.status == AssignmentStatus.PLEDGED,
+        )
+    )
+    for other in other_pledges.scalars().all():
+        other.status = AssignmentStatus.FAILED
+        other.failure_reason = "تمت الموافقة على مؤسسة أخرى"
+    
+    # تحديث حالة الطلب
+    req.status = RequestStatus.ASSIGNED
+    req.inspector_id = current_user.id
+    
+    # اسم المؤسسة المعتمدة
+    org_result = await db.execute(
+        select(Organization).where(Organization.id == assignment.org_id)
+    )
+    org = org_result.scalar_one_or_none()
+    
+    await db.commit()
+    
+    return {
+        "message": f"تمت الموافقة على {org.name} للتكفل بهذا الطلب",
+        "assignment_id": str(assignment.id),
+    }
 
 
 # === الجمعيات المتاحة ===

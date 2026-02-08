@@ -30,7 +30,7 @@ router = APIRouter(prefix="/org", tags=["المؤسسات - Organizations"])
 
 # === الطلبات المتاحة ===
 
-@router.get("/requests/available", response_model=PaginatedRequests)
+@router.get("/requests/available")
 async def get_available_requests(
     category: Optional[RequestCategory] = Query(default=None),
     region: Optional[str] = Query(default=None),
@@ -39,7 +39,13 @@ async def get_available_requests(
     current_user: User = Depends(get_current_organization),
     db: AsyncSession = Depends(get_db),
 ):
-    """عرض الطلبات المتاحة للتكفل"""
+    """عرض الطلبات المتاحة للتكفل (حالة NEW) مع عدد التعهدات"""
+    # الحصول على المؤسسة الحالية
+    org_result = await db.execute(
+        select(Organization).where(Organization.user_id == current_user.id)
+    )
+    org = org_result.scalar_one_or_none()
+    
     query = select(Request).where(Request.status == RequestStatus.NEW)
     
     if category:
@@ -58,13 +64,42 @@ async def get_available_requests(
     result = await db.execute(query)
     requests = result.scalars().all()
     
-    return PaginatedRequests(
-        items=[RequestResponse.model_validate(r) for r in requests],
-        total=total,
-        page=page,
-        limit=limit,
-        has_more=(page * limit) < total,
-    )
+    # لكل طلب، جلب عدد التعهدات + هل هذه المؤسسة تعهدت
+    items = []
+    for r in requests:
+        pledge_count_result = await db.execute(
+            select(func.count(Assignment.id)).where(
+                Assignment.request_id == r.id,
+                Assignment.status == AssignmentStatus.PLEDGED,
+            )
+        )
+        pledge_count = pledge_count_result.scalar() or 0
+        
+        # هل هذه المؤسسة تعهدت بالفعل
+        already_pledged = False
+        if org:
+            my_pledge = await db.execute(
+                select(Assignment.id).where(
+                    Assignment.request_id == r.id,
+                    Assignment.org_id == org.id,
+                    Assignment.status == AssignmentStatus.PLEDGED,
+                )
+            )
+            already_pledged = my_pledge.scalar_one_or_none() is not None
+        
+        req_data = RequestResponse.model_validate(r).model_dump()
+        req_data["requester_phone"] = None  # إخفاء الهاتف عن المؤسسات
+        req_data["pledge_count"] = pledge_count
+        req_data["already_pledged"] = already_pledged
+        items.append(req_data)
+    
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "has_more": (page * limit) < total,
+    }
 
 
 @router.get("/requests/{request_id}")
@@ -93,7 +128,7 @@ async def create_assignment(
     current_user: User = Depends(get_current_organization),
     db: AsyncSession = Depends(get_db),
 ):
-    """التكفل بطلب"""
+    """التعهد بطلب - ينتظر موافقة المراقب"""
     # الحصول على المؤسسة
     org_result = await db.execute(
         select(Organization).where(Organization.user_id == current_user.id)
@@ -113,20 +148,20 @@ async def create_assignment(
         raise HTTPException(status_code=404, detail="الطلب غير موجود")
     
     if request.status != RequestStatus.NEW:
-        raise HTTPException(status_code=400, detail="الطلب غير متاح للتكفل")
+        raise HTTPException(status_code=400, detail="الطلب غير متاح للتعهد")
     
-    # التحقق من عدم وجود تكفل سابق
+    # التحقق من عدم وجود تعهد سابق من نفس المؤسسة
     existing = await db.execute(
         select(Assignment).where(
             Assignment.request_id == body.request_id,
             Assignment.org_id == org.id,
-            Assignment.status != AssignmentStatus.FAILED,
+            Assignment.status == AssignmentStatus.PLEDGED,
         )
     )
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="لديك تكفل سابق بهذا الطلب")
+        raise HTTPException(status_code=400, detail="لديك تعهد سابق بهذا الطلب")
     
-    # إنشاء التكفل
+    # إنشاء التعهد (الطلب يبقى NEW - لا يتغير حتى موافقة المراقب)
     assignment = Assignment(
         request_id=body.request_id,
         org_id=org.id,
@@ -134,9 +169,6 @@ async def create_assignment(
         notes=body.notes,
     )
     db.add(assignment)
-    
-    # تحديث حالة الطلب
-    request.status = RequestStatus.ASSIGNED
     
     await db.commit()
     await db.refresh(assignment)
@@ -219,14 +251,21 @@ async def get_assignment_detail(
     request = request_result.scalar_one_or_none()
     
     # خصوصية الهاتف: إذا لم يكن للمؤسسة إذن، نُخفي رقم الهاتف
-    phone = request.requester_phone if assignment.allow_phone_access else None
+    citizen_phone = request.requester_phone if assignment.allow_phone_access else None
+    
+    # معلومات المراقب
+    inspector_phone_val = assignment.inspector_phone
+    
+    # رقم التواصل (رقم المواطن أو رقم بديل حدده المراقب)
+    contact_phone_val = assignment.contact_phone or citizen_phone
+    contact_name_val = assignment.contact_name or request.requester_name
     
     return {
         "assignment": AssignmentResponse.model_validate(assignment),
         "request": {
             "id": str(request.id),
             "requester_name": request.requester_name,
-            "requester_phone": phone,
+            "requester_phone": citizen_phone,
             "category": request.category.value,
             "description": request.description,
             "quantity": request.quantity,
@@ -237,6 +276,11 @@ async def get_assignment_detail(
             "latitude": request.latitude,
             "longitude": request.longitude,
             "is_urgent": request.is_urgent,
+        },
+        "contact": {
+            "name": contact_name_val,
+            "phone": contact_phone_val,
+            "inspector_phone": inspector_phone_val,
         },
     }
 
@@ -269,6 +313,15 @@ async def update_assignment(
     if not assignment:
         raise HTTPException(status_code=404, detail="التكفل غير موجود")
     
+    # المؤسسة لا يمكنها تحويل تعهد إلى IN_PROGRESS (يفعلها المراقب فقط عبر الموافقة)
+    if body.status == AssignmentStatus.IN_PROGRESS and assignment.status == AssignmentStatus.PLEDGED:
+        raise HTTPException(status_code=400, detail="لا يمكنك بدء التنفيذ مباشرة - يجب انتظار موافقة المراقب")
+    
+    # المؤسسة يمكنها فقط: COMPLETED أو FAILED من IN_PROGRESS
+    if assignment.status == AssignmentStatus.IN_PROGRESS:
+        if body.status not in (AssignmentStatus.COMPLETED, AssignmentStatus.FAILED):
+            raise HTTPException(status_code=400, detail="يمكنك فقط إتمام أو إلغاء التكفل")
+    
     # تحديث الحالة
     assignment.status = body.status
     
@@ -284,10 +337,7 @@ async def update_assignment(
     )
     request = request_result.scalar_one_or_none()
     
-    if body.status == AssignmentStatus.IN_PROGRESS:
-        request.status = RequestStatus.IN_PROGRESS
-        
-    elif body.status == AssignmentStatus.COMPLETED:
+    if body.status == AssignmentStatus.COMPLETED:
         assignment.completed_at = datetime.now(timezone.utc)
         request.status = RequestStatus.COMPLETED
         request.completed_at = datetime.now(timezone.utc)

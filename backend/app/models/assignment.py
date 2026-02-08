@@ -22,6 +22,11 @@ class Assignment(Base):
     # خصوصية الهاتف - هل يُسمح للمؤسسة برؤية رقم الهاتف
     allow_phone_access = Column(Boolean, default=False, nullable=False)
     
+    # معلومات التواصل (يحددها المراقب عند الموافقة)
+    contact_name = Column(String(200), nullable=True)         # اسم التواصل (بديل عن اسم المواطن)
+    contact_phone = Column(String(20), nullable=True)         # رقم التواصل (بديل عن رقم المواطن)
+    inspector_phone = Column(String(20), nullable=True)       # رقم المراقب للتواصل
+    
     # تفاصيل التنفيذ
     notes = Column(Text, nullable=True)                       # ملاحظات المؤسسة
     completion_notes = Column(Text, nullable=True)            # ملاحظات الإتمام
