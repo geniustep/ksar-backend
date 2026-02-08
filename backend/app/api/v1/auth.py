@@ -24,6 +24,7 @@ from app.schemas.auth import (
     PhoneRegisterRequest,
     PhoneRegisterResponse,
     InspectorLoginResponse,
+    UnifiedLoginRequest,
 )
 from app.schemas.inspector import InspectorLoginRequest
 from app.schemas.organization import OrgLoginRequest
@@ -110,6 +111,83 @@ async def register(
             role=user.role,
         ),
         access_token=access_token,
+    )
+
+
+@router.post("/unified-login", response_model=LoginResponse)
+async def unified_login(
+    body: UnifiedLoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    تسجيل الدخول الموحد - يقبل البريد الإلكتروني أو رقم الهاتف + كلمة المرور/كود الدخول
+    
+    - يكتشف تلقائياً هل المُدخل بريد أو هاتف
+    - يبحث في جميع أنواع المستخدمين (أدمين، مراقب، مؤسسة)
+    - يوجه المستخدم حسب دوره
+    """
+    if body.is_email():
+        # البحث بالبريد الإلكتروني
+        result = await db.execute(
+            select(User).where(User.email == body.identifier.lower())
+        )
+        user = result.scalar_one_or_none()
+    else:
+        # البحث برقم الهاتف (تنظيف الرقم أولاً)
+        phone = body.get_clean_phone()
+        result = await db.execute(
+            select(User).where(User.phone == phone)
+        )
+        user = result.scalar_one_or_none()
+    
+    if not user or not verify_password(body.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="بيانات الدخول غير صحيحة",
+        )
+    
+    if user.status.value == "suspended":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="الحساب معطل",
+        )
+    
+    # تحديث وقت آخر دخول
+    user.last_login = datetime.now(timezone.utc)
+    await db.commit()
+    
+    # الحصول على بيانات المؤسسة إن وجدت
+    org_id = None
+    org_name = None
+    if user.role.value == "organization":
+        org_result = await db.execute(
+            select(Organization).where(Organization.user_id == user.id)
+        )
+        org = org_result.scalar_one_or_none()
+        if org:
+            org_id = str(org.id)
+            org_name = org.name
+    
+    # إنشاء التوكن
+    access_token = create_access_token(
+        data={
+            "sub": str(user.id),
+            "role": user.role.value,
+            "org_id": org_id,
+        }
+    )
+    
+    return LoginResponse(
+        access_token=access_token,
+        user=UserResponse(
+            id=str(user.id),
+            email=user.email,
+            full_name=user.full_name,
+            phone=user.phone,
+            role=user.role,
+            organization_id=org_id,
+            organization_name=org_name,
+        ),
     )
 
 

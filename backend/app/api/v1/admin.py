@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.database import get_db
-from app.api.deps import get_current_admin
+from app.api.deps import get_current_admin, get_current_superadmin
 from app.models.request import Request
 from app.models.assignment import Assignment
 from app.models.organization import Organization
@@ -876,6 +876,158 @@ async def delete_citizen(
     await db.commit()
     
     return {"message": "تم حذف المواطن"}
+
+
+# === إدارة المشرفين (superadmin فقط) ===
+
+@router.get("/admins")
+async def get_admins(
+    status: Optional[str] = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
+    current_user: User = Depends(get_current_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    """قائمة المشرفين (متاح للمدير العام فقط)"""
+    query = select(User).where(User.role == UserRole.ADMIN)
+    
+    if status:
+        query = query.where(User.status == UserStatus(status))
+    
+    count_query = select(func.count()).select_from(query.subquery())
+    total = (await db.execute(count_query)).scalar()
+    
+    query = query.order_by(User.created_at.desc())
+    query = query.offset((page - 1) * limit).limit(limit)
+    
+    result = await db.execute(query)
+    admins = result.scalars().all()
+    
+    return {
+        "items": [
+            {
+                "id": str(a.id),
+                "full_name": a.full_name,
+                "email": a.email,
+                "phone": a.phone,
+                "status": a.status.value,
+                "created_at": a.created_at.isoformat(),
+                "last_login": a.last_login.isoformat() if a.last_login else None,
+            }
+            for a in admins
+        ],
+        "total": total,
+        "page": page,
+        "limit": limit,
+    }
+
+
+@router.post("/admins", status_code=201)
+async def create_admin(
+    full_name: str = Query(..., description="اسم المشرف"),
+    email: str = Query(..., description="البريد الإلكتروني"),
+    password: str = Query(..., description="كلمة المرور"),
+    phone: Optional[str] = Query(default=None, description="رقم الهاتف"),
+    current_user: User = Depends(get_current_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    """إنشاء حساب مشرف جديد (متاح للمدير العام فقط)"""
+    # التحقق من عدم وجود البريد مسبقاً
+    email_lower = email.lower().strip()
+    email_result = await db.execute(
+        select(User).where(User.email == email_lower)
+    )
+    if email_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=400,
+            detail="البريد الإلكتروني مستخدم بالفعل",
+        )
+    
+    # التحقق من الهاتف إن وُجد
+    if phone:
+        phone = phone.replace(' ', '').replace('-', '')
+        phone_result = await db.execute(
+            select(User).where(User.phone == phone)
+        )
+        if phone_result.scalar_one_or_none():
+            raise HTTPException(
+                status_code=400,
+                detail="رقم الهاتف مستخدم بالفعل",
+            )
+    
+    # إنشاء المشرف
+    user = User(
+        email=email_lower,
+        password_hash=hash_password(password),
+        full_name=full_name.strip(),
+        phone=phone,
+        role=UserRole.ADMIN,
+        status=UserStatus.ACTIVE,
+    )
+    
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    
+    return {
+        "message": "تم إنشاء حساب المشرف بنجاح",
+        "admin": {
+            "id": str(user.id),
+            "full_name": user.full_name,
+            "email": user.email,
+            "phone": user.phone,
+            "status": user.status.value,
+            "created_at": user.created_at.isoformat(),
+            "last_login": None,
+        },
+    }
+
+
+@router.patch("/admins/{admin_id}/status")
+async def update_admin_status(
+    admin_id: UUID,
+    status: str = Query(..., description="الحالة الجديدة (active/suspended)"),
+    current_user: User = Depends(get_current_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    """تعطيل/تفعيل مشرف (متاح للمدير العام فقط)"""
+    result = await db.execute(
+        select(User).where(User.id == admin_id, User.role == UserRole.ADMIN)
+    )
+    admin = result.scalar_one_or_none()
+    
+    if not admin:
+        raise HTTPException(status_code=404, detail="المشرف غير موجود")
+    
+    admin.status = UserStatus(status)
+    await db.commit()
+    
+    return {"message": f"تم تحديث حالة المشرف إلى {status}"}
+
+
+@router.delete("/admins/{admin_id}")
+async def delete_admin(
+    admin_id: UUID,
+    current_user: User = Depends(get_current_superadmin),
+    db: AsyncSession = Depends(get_db),
+):
+    """حذف مشرف (متاح للمدير العام فقط)"""
+    result = await db.execute(
+        select(User).where(User.id == admin_id, User.role == UserRole.ADMIN)
+    )
+    admin = result.scalar_one_or_none()
+    
+    if not admin:
+        raise HTTPException(status_code=404, detail="المشرف غير موجود")
+    
+    # لا يمكن حذف نفسك
+    if admin.id == current_user.id:
+        raise HTTPException(status_code=400, detail="لا يمكنك حذف حسابك الخاص")
+    
+    await db.delete(admin)
+    await db.commit()
+    
+    return {"message": "تم حذف المشرف"}
 
 
 # === التحكم بخصوصية الهاتف ===

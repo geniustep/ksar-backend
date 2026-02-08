@@ -11,6 +11,20 @@ class LoginRequest(BaseModel):
     password: str = Field(..., min_length=6)
 
 
+class UnifiedLoginRequest(BaseModel):
+    """طلب تسجيل الدخول الموحد - بريد أو هاتف + كلمة مرور/كود"""
+    identifier: str = Field(..., min_length=4, description="البريد الإلكتروني أو رقم الهاتف")
+    password: str = Field(..., min_length=4, description="كلمة المرور أو كود الدخول")
+
+    def is_email(self) -> bool:
+        """تحقق هل المُدخل بريد إلكتروني"""
+        return '@' in self.identifier
+
+    def get_clean_phone(self) -> str:
+        """تنظيف رقم الهاتف"""
+        return re.sub(r'[\s\-]', '', self.identifier)
+
+
 class RegisterRequest(BaseModel):
     """طلب تسجيل مستخدم جديد (مواطن)"""
     email: EmailStr

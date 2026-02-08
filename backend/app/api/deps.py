@@ -66,6 +66,18 @@ async def get_current_admin(
     return current_user
 
 
+async def get_current_superadmin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """التحقق من صلاحيات المدير العام (superadmin فقط)"""
+    if current_user.role != UserRole.SUPERADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="هذه العملية متاحة للمدير العام فقط",
+        )
+    return current_user
+
+
 async def get_current_organization(
     current_user: User = Depends(get_current_user),
 ) -> User:
