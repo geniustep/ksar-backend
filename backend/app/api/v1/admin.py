@@ -5,7 +5,7 @@ from typing import Optional
 from uuid import UUID
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import select, func, case, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -689,10 +689,11 @@ async def update_inspector_status(
 @router.post("/inspectors/{inspector_id}/regenerate-code")
 async def regenerate_inspector_code(
     inspector_id: UUID,
+    custom_code: Optional[str] = Body(None, embed=True),
     current_user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """إعادة توليد كود دخول المراقب"""
+    """إعادة توليد كود دخول المراقب أو تعيين كود مخصص"""
     import secrets
     
     result = await db.execute(
@@ -703,15 +704,23 @@ async def regenerate_inspector_code(
     if not inspector:
         raise HTTPException(status_code=404, detail="المراقب غير موجود")
     
-    # توليد كود جديد
-    access_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+    # استخدام كود مخصص إن وُجد، وإلا توليد تلقائي
+    if custom_code:
+        # التحقق من صحة الكود المخصص (6 أرقام)
+        custom_code = custom_code.strip()
+        if not custom_code.isdigit() or len(custom_code) != 6:
+            raise HTTPException(status_code=400, detail="الكود يجب أن يكون 6 أرقام")
+        access_code = custom_code
+    else:
+        access_code = ''.join([str(secrets.randbelow(10)) for _ in range(6)])
+    
     inspector.password_hash = hash_password(access_code)
     inspector.access_code = access_code
     
     await db.commit()
     
     return {
-        "message": "تم إعادة توليد كود الدخول",
+        "message": "تم تحديث كود الدخول" if custom_code else "تم إعادة توليد كود الدخول",
         "access_code": access_code,
     }
 
