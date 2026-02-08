@@ -484,3 +484,86 @@ async def get_available_organizations(
             for o in orgs
         ]
     }
+
+
+@router.get("/organizations/details")
+async def get_organizations_with_assignments(
+    current_user: User = Depends(get_current_inspector),
+    db: AsyncSession = Depends(get_db),
+):
+    """قائمة الجمعيات مع تكفلاتها النشطة"""
+    # جلب جميع المؤسسات النشطة
+    orgs_result = await db.execute(
+        select(Organization)
+        .where(Organization.status == OrganizationStatus.ACTIVE)
+        .order_by(Organization.name)
+    )
+    orgs = orgs_result.scalars().all()
+    
+    items = []
+    for org in orgs:
+        # جلب التكفلات النشطة (pledged + in_progress) مع تفاصيل الطلب
+        assignments_result = await db.execute(
+            select(Assignment, Request)
+            .join(Request, Assignment.request_id == Request.id)
+            .where(
+                Assignment.org_id == org.id,
+                Assignment.status.in_([AssignmentStatus.PLEDGED, AssignmentStatus.IN_PROGRESS])
+            )
+            .order_by(Assignment.created_at.desc())
+        )
+        active_assignments = assignments_result.all()
+        
+        # جلب عدد التكفلات المكتملة والفاشلة
+        completed_count_result = await db.execute(
+            select(func.count(Assignment.id)).where(
+                Assignment.org_id == org.id,
+                Assignment.status == AssignmentStatus.COMPLETED
+            )
+        )
+        completed_count = completed_count_result.scalar() or 0
+        
+        failed_count_result = await db.execute(
+            select(func.count(Assignment.id)).where(
+                Assignment.org_id == org.id,
+                Assignment.status == AssignmentStatus.FAILED
+            )
+        )
+        failed_count = failed_count_result.scalar() or 0
+        
+        items.append({
+            "id": str(org.id),
+            "name": org.name,
+            "description": org.description,
+            "contact_phone": org.contact_phone,
+            "contact_email": org.contact_email,
+            "service_types": org.service_types or [],
+            "coverage_areas": org.coverage_areas or [],
+            "total_completed": completed_count,
+            "total_failed": failed_count,
+            "active_assignments": [
+                {
+                    "id": str(a.id),
+                    "status": a.status.value,
+                    "notes": a.notes,
+                    "created_at": a.created_at.isoformat() if a.created_at else None,
+                    "request": {
+                        "id": str(r.id),
+                        "requester_name": r.requester_name,
+                        "category": r.category.value,
+                        "description": r.description,
+                        "city": r.city,
+                        "region": r.region,
+                        "family_members": r.family_members,
+                        "quantity": r.quantity,
+                        "is_urgent": r.is_urgent,
+                        "priority_score": r.priority_score,
+                        "status": r.status.value,
+                        "created_at": r.created_at.isoformat() if r.created_at else None,
+                    }
+                }
+                for a, r in active_assignments
+            ],
+        })
+    
+    return {"items": items}
