@@ -16,7 +16,7 @@ from app.core.constants import RequestCategory, RequestStatus
 class InspectorLoginRequest(BaseModel):
     """طلب تسجيل دخول المراقب"""
     phone: str = Field(..., min_length=10, max_length=20, description="رقم الهاتف")
-    code: str = Field(..., min_length=4, max_length=8, description="كود الدخول")
+    code: str = Field(..., min_length=6, max_length=20, description="كود الدخول")
 
     @field_validator('phone')
     @classmethod

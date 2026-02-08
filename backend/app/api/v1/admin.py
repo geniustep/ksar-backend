@@ -1,6 +1,7 @@
 """
 واجهة الإدارة - مراقبة الطلبات والتحليلات وإدارة المؤسسات والمواطنين
 """
+import re
 from typing import Optional
 from uuid import UUID
 from datetime import datetime, timedelta, timezone
@@ -24,7 +25,7 @@ from app.schemas.request import (
 )
 from app.schemas.assignment import AssignmentBriefResponse
 from app.core.constants import RequestStatus, RequestCategory, AssignmentStatus, UserRole, UserStatus, OrganizationStatus
-from app.core.security import hash_password
+from app.core.security import hash_password, generate_strong_code
 from app.schemas.inspector import (
     InspectorCreateRequest,
     InspectorResponse,
@@ -337,19 +338,23 @@ async def get_organizations(
     db: AsyncSession = Depends(get_db),
 ):
     """قائمة المؤسسات"""
-    query = select(Organization)
+    base_query = select(Organization)
     
     if status:
-        query = query.where(Organization.status == status)
+        base_query = base_query.where(Organization.status == status)
     
-    count_query = select(func.count()).select_from(query.subquery())
+    count_query = select(func.count()).select_from(base_query.subquery())
     total = (await db.execute(count_query)).scalar()
     
+    # Join مع User للحصول على access_code
+    query = select(Organization, User.access_code).join(User, Organization.user_id == User.id)
+    if status:
+        query = query.where(Organization.status == status)
     query = query.order_by(Organization.created_at.desc())
     query = query.offset((page - 1) * limit).limit(limit)
     
     result = await db.execute(query)
-    orgs = result.scalars().all()
+    rows = result.all()
     
     return {
         "items": [
@@ -361,8 +366,9 @@ async def get_organizations(
                 "status": o.status.value,
                 "total_completed": o.total_completed,
                 "created_at": o.created_at.isoformat(),
+                "access_code": code,
             }
-            for o in orgs
+            for o, code in rows
         ],
         "total": total,
         "page": page,
@@ -378,7 +384,6 @@ async def create_organization(
 ):
     """إنشاء مؤسسة جديدة (نفس نمط إنشاء المراقب - توليد كود دخول)"""
     import secrets
-    import string
     
     # تنظيف رقم الهاتف
     phone = body.phone.replace(' ', '').replace('-', '')
@@ -393,9 +398,7 @@ async def create_organization(
             detail="رقم الهاتف مستخدم بالفعل",
         )
     
-    # توليد كود دخول من 8 أحرف أبجدية رقمية (بدون أحرف ملتبسة)
-    alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
-    access_code = ''.join(secrets.choice(alphabet) for _ in range(8))
+    access_code = generate_strong_code()
     
     # إنشاء بريد إلكتروني وهمي فريد (إن لم يُرسل)
     email = body.email
@@ -464,10 +467,11 @@ async def create_organization(
 @router.post("/organizations/{org_id}/regenerate-code")
 async def regenerate_organization_code(
     org_id: UUID,
+    custom_code: Optional[str] = Body(None, embed=True),
     current_user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """إعادة توليد كود دخول المؤسسة"""
+    """إعادة توليد كود دخول المؤسسة أو تعيين كود مخصص"""
     import secrets
     
     result = await db.execute(
@@ -487,9 +491,17 @@ async def regenerate_organization_code(
     if not user:
         raise HTTPException(status_code=404, detail="حساب المؤسسة غير موجود")
     
-    # توليد كود جديد من 8 أحرف أبجدية رقمية
-    alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
-    access_code = ''.join(secrets.choice(alphabet) for _ in range(8))
+    # استخدام كود مخصص إن وُجد، وإلا توليد تلقائي
+    if custom_code:
+        custom_code = custom_code.strip()
+        if len(custom_code) < 6 or len(custom_code) > 20:
+            raise HTTPException(status_code=400, detail="الكود يجب أن يكون بين 6 و 20 حرف")
+        if re.search(r'\s', custom_code):
+            raise HTTPException(status_code=400, detail="الكود لا يجب أن يحتوي على مسافات")
+        access_code = custom_code
+    else:
+        access_code = generate_strong_code()
+    
     user.password_hash = hash_password(access_code)
     user.access_code = access_code
     
@@ -588,9 +600,7 @@ async def create_inspector(
             detail="رقم الهاتف مستخدم بالفعل",
         )
     
-    # توليد كود دخول من 8 أحرف أبجدية رقمية (بدون أحرف ملتبسة)
-    alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
-    access_code = ''.join(secrets.choice(alphabet) for _ in range(8))
+    access_code = generate_strong_code()
     
     # إنشاء بريد إلكتروني وهمي فريد
     random_suffix = secrets.token_hex(4)
@@ -710,17 +720,14 @@ async def regenerate_inspector_code(
     
     # استخدام كود مخصص إن وُجد، وإلا توليد تلقائي
     if custom_code:
-        # التحقق من صحة الكود المخصص (4-8 أحرف أبجدية رقمية)
-        custom_code = custom_code.strip().upper()
-        if len(custom_code) < 4 or len(custom_code) > 8:
-            raise HTTPException(status_code=400, detail="الكود يجب أن يكون بين 4 و 8 أحرف")
-        if not custom_code.isalnum():
-            raise HTTPException(status_code=400, detail="الكود يجب أن يحتوي على أحرف وأرقام فقط")
+        custom_code = custom_code.strip()
+        if len(custom_code) < 6 or len(custom_code) > 20:
+            raise HTTPException(status_code=400, detail="الكود يجب أن يكون بين 6 و 20 حرف")
+        if re.search(r'\s', custom_code):
+            raise HTTPException(status_code=400, detail="الكود لا يجب أن يحتوي على مسافات")
         access_code = custom_code
     else:
-        # توليد كود من 8 أحرف أبجدية رقمية (بدون أحرف ملتبسة)
-        alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
-        access_code = ''.join(secrets.choice(alphabet) for _ in range(8))
+        access_code = generate_strong_code()
     
     inspector.password_hash = hash_password(access_code)
     inspector.access_code = access_code

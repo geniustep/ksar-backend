@@ -19,8 +19,8 @@ class User(Base):
     email = Column(String(100), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     
-    # كود الدخول للمراقبين (نص صريح للأدمين)
-    access_code = Column(String(10), nullable=True)
+    # كود الدخول للمراقبين والمؤسسات (نص صريح للأدمين)
+    access_code = Column(String(20), nullable=True)
     
     # البيانات الأساسية
     full_name = Column(String(100), nullable=False)

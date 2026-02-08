@@ -1,6 +1,7 @@
 """
 وحدة الأمان - تشفير كلمات المرور وإدارة التوكنات
 """
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 
@@ -8,6 +9,44 @@ from jose import jwt, JWTError
 from passlib.context import CryptContext
 
 from app.config import settings
+
+# مكونات الكود القوي
+_UPPER = 'ABCDEFGHJKMNPQRSTUVWXYZ'
+_LOWER = 'abcdefghjkmnpqrstuvwxyz'
+_DIGITS = '23456789'
+_SYMBOLS = '@#$%&*!?'
+_ALL_CHARS = _UPPER + _LOWER + _DIGITS + _SYMBOLS
+
+
+def generate_strong_code(length: int = 10) -> str:
+    """
+    توليد كود دخول قوي يحتوي إجباريا على:
+    - حرف كبير (Majuscule)
+    - حرف صغير (Minuscule)
+    - رقم
+    - رمز خاص
+    """
+    while True:
+        # ضمان وجود حرف واحد على الأقل من كل نوع
+        code_chars = [
+            secrets.choice(_UPPER),
+            secrets.choice(_LOWER),
+            secrets.choice(_DIGITS),
+            secrets.choice(_SYMBOLS),
+        ]
+        # ملء باقي الكود بأحرف عشوائية من الكل
+        code_chars += [secrets.choice(_ALL_CHARS) for _ in range(length - 4)]
+        # خلط الترتيب
+        result = list(code_chars)
+        secrets.SystemRandom().shuffle(result)
+        code = ''.join(result)
+        # تأكد إضافي
+        has_upper = any(c in _UPPER for c in code)
+        has_lower = any(c in _LOWER for c in code)
+        has_digit = any(c in _DIGITS for c in code)
+        has_symbol = any(c in _SYMBOLS for c in code)
+        if has_upper and has_lower and has_digit and has_symbol:
+            return code
 
 # إعداد تشفير كلمات المرور
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

@@ -2,6 +2,7 @@
 واجهة عامة - للاستعلام والتتبع (بدون تسجيل)
 """
 import hashlib
+import re
 import secrets
 from uuid import UUID
 
@@ -17,7 +18,7 @@ from app.models.user import User
 from app.schemas.request import RequestTrackResponse
 from app.schemas.organization import OrgRegisterRequest
 from app.core.constants import RequestStatus, UserRole, UserStatus, OrganizationStatus, AssignmentStatus
-from app.core.security import hash_password
+from app.core.security import hash_password, generate_strong_code
 
 router = APIRouter(prefix="/public", tags=["عام - Public"])
 
@@ -151,9 +152,16 @@ async def register_organization(
         random_suffix = secrets.token_hex(4)
         email = f"org_{phone}_{random_suffix}@org.ksar.local"
     
-    # توليد كود دخول من 8 أحرف أبجدية رقمية (بدون أحرف ملتبسة)
-    alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
-    access_code = ''.join(secrets.choice(alphabet) for _ in range(8))
+    # استخدام كود مفضل إن وُجد، وإلا توليد تلقائي
+    if body.preferred_code:
+        preferred = body.preferred_code.strip()
+        if len(preferred) < 6 or len(preferred) > 20:
+            raise HTTPException(status_code=400, detail="الكود يجب أن يكون بين 6 و 20 حرف")
+        if re.search(r'\s', preferred):
+            raise HTTPException(status_code=400, detail="الكود لا يجب أن يحتوي على مسافات")
+        access_code = preferred
+    else:
+        access_code = generate_strong_code()
     
     # إنشاء المستخدم بحالة معلقة
     user = User(
