@@ -356,6 +356,14 @@ async def get_organizations(
     result = await db.execute(query)
     rows = result.all()
     
+    # مزامنة حالة المستخدم مع حالة المؤسسة للمؤسسات النشطة (معالجة بيانات قديمة)
+    for o, _ in rows:
+        if o.status == OrganizationStatus.ACTIVE:
+            u = (await db.execute(select(User).where(User.id == o.user_id))).scalar_one_or_none()
+            if u and u.status != UserStatus.ACTIVE:
+                u.status = UserStatus.ACTIVE
+    await db.commit()
+    
     return {
         "items": [
             {
@@ -560,7 +568,7 @@ async def update_organization_status(
     current_user: User = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """تحديث حالة مؤسسة"""
+    """تحديث حالة المؤسسة وحساب المستخدم معاً (ليتطابق الدخول مع لوحة الإدارة)"""
     result = await db.execute(
         select(Organization).where(Organization.id == org_id)
     )
@@ -569,8 +577,19 @@ async def update_organization_status(
     if not org:
         raise HTTPException(status_code=404, detail="المؤسسة غير موجودة")
     
-    from app.core.constants import OrganizationStatus
     org.status = OrganizationStatus(status)
+    
+    # مزامنة حالة المستخدم المرتبط حتى ينجح تسجيل الدخول عند التفعيل
+    user_result = await db.execute(
+        select(User).where(User.id == org.user_id)
+    )
+    user = user_result.scalar_one_or_none()
+    if user:
+        if status == "active":
+            user.status = UserStatus.ACTIVE
+        elif status == "suspended":
+            user.status = UserStatus.SUSPENDED
+    
     await db.commit()
     
     return {"message": "تم تحديث حالة المؤسسة"}
