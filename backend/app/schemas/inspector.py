@@ -78,6 +78,29 @@ class InspectorRequestUpdate(BaseModel):
     inspector_notes: Optional[str] = Field(default=None, max_length=2000)
 
 
+class InspectorRequestDataUpdate(BaseModel):
+    """تحرير بيانات الطلب من طرف المراقب"""
+    requester_name: Optional[str] = Field(default=None, min_length=2, max_length=100, description="اسم صاحب الطلب")
+    requester_phone: Optional[str] = Field(default=None, min_length=10, max_length=20, description="رقم الهاتف")
+    category: Optional[RequestCategory] = Field(default=None, description="تصنيف الطلب")
+    description: Optional[str] = Field(default=None, max_length=2000, description="وصف الطلب")
+    quantity: Optional[int] = Field(default=None, ge=1, description="الكمية")
+    family_members: Optional[int] = Field(default=None, ge=1, description="عدد أفراد الأسرة")
+    address: Optional[str] = Field(default=None, max_length=500, description="العنوان")
+    city: Optional[str] = Field(default=None, max_length=100, description="المدينة")
+    region: Optional[str] = Field(default=None, max_length=100, description="المنطقة")
+
+    @field_validator('requester_phone')
+    @classmethod
+    def validate_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        phone = re.sub(r'[\s\-]', '', v)
+        if not re.match(r'^(\+?[0-9]{10,15})$', phone):
+            raise ValueError('رقم الهاتف غير صالح')
+        return phone
+
+
 class InspectorRequestStatusUpdate(BaseModel):
     """تحديث حالة الطلب وأهميته"""
     status: Optional[RequestStatus] = Field(default=None, description="الحالة الجديدة")

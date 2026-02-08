@@ -18,6 +18,7 @@ from app.models.user import User
 from app.schemas.request import RequestResponse, PaginatedRequests
 from app.schemas.inspector import (
     InspectorRequestUpdate,
+    InspectorRequestDataUpdate,
     InspectorRequestStatusUpdate,
     InspectorAssignRequest,
     InspectorRejectRequest,
@@ -285,6 +286,42 @@ async def update_request_notes(
     await db.refresh(req)
     
     return {"message": "تم تحديث الملاحظات", "data": RequestResponse.model_validate(req)}
+
+
+@router.patch("/requests/{request_id}/edit")
+async def edit_request_data(
+    request_id: UUID,
+    body: InspectorRequestDataUpdate,
+    current_user: User = Depends(get_current_inspector),
+    db: AsyncSession = Depends(get_db),
+):
+    """تحرير بيانات الطلب من طرف المراقب"""
+    result = await db.execute(
+        select(Request).where(Request.id == request_id)
+    )
+    req = result.scalar_one_or_none()
+    
+    if not req:
+        raise HTTPException(status_code=404, detail="الطلب غير موجود")
+    
+    # تطبيق التعديلات
+    update_fields = body.model_dump(exclude_unset=True)
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="لم يتم تقديم أي بيانات للتحديث")
+    
+    for field, value in update_fields.items():
+        setattr(req, field, value)
+    
+    # ربط المراقب بالطلب إن لم يكن مربوطاً
+    if not req.inspector_id:
+        req.inspector_id = current_user.id
+    
+    req.updated_at = datetime.now(timezone.utc)
+    
+    await db.commit()
+    await db.refresh(req)
+    
+    return {"message": "تم تحديث بيانات الطلب بنجاح", "data": RequestResponse.model_validate(req)}
 
 
 @router.patch("/requests/{request_id}/status")
